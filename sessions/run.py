@@ -146,7 +146,7 @@ def run_pair(session: dict, pair: dict) -> dict:
         "when": {"started_at": utcnow(), "finished_at": None},
         "services": services,
     }
-    print(f"pair {slug}: wipe → up {', '.join(services)}")
+    print(f"pair {slug}: wipe -> up {', '.join(services)}")
     wipe_stack(env_file)
     try:
         compose_checked(["up", "-d", "--build", *services], env_file, capture=False)
@@ -330,6 +330,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     os.chdir(ROOT)
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(encoding="utf-8", errors="replace")
     args = build_parser().parse_args()
     try:
         return args.func(args)

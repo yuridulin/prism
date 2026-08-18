@@ -1,6 +1,6 @@
 sessions:
 - id: 20260818T174002-iot-steady
-  status: planned
+  status: failed
   created_at: '2026-08-18T17:40:02Z'
   why: Базовый write-path на стартовом конверте — пары по очереди, Go/Timescale затем
     Python/Influx.

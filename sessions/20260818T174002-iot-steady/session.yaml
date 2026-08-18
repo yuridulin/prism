@@ -4,7 +4,8 @@ when:
   created_at: '2026-08-18T17:40:02Z'
   started_at: null
   finished_at: null
-why: Базовый write-path на стартовом конверте — пары по очереди, Go/Timescale затем Python/Influx.
+why: Базовый write-path на стартовом конверте — пары по очереди, Go/Timescale затем
+  Python/Influx.
 what:
   duration: 5m
   duration_seconds: 300
@@ -12,8 +13,10 @@ what:
     profile: iot-steady
     transport: ''
   pairs:
-    - { backend: go, storage: timescaledb }
-    - { backend: python, storage: influxdb }
+  - backend: go
+    storage: timescaledb
+  - backend: python
+    storage: influxdb
   resources:
     api:
       cpus: '1.0'
