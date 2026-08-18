@@ -1,0 +1,12 @@
+backend: python
+storage: influxdb
+status: failed
+when:
+  started_at: '2026-08-18T17:55:55Z'
+  finished_at: '2026-08-18T17:55:56Z'
+services:
+- nats
+- influxdb
+- python-api
+- prometheus
+error: 'docker compose up -d --build nats influxdb python-api prometheus failed: '

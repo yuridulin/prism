@@ -1,0 +1,14 @@
+backend: go
+storage: timescaledb
+status: failed
+when:
+  started_at: '2026-08-18T17:54:36Z'
+  finished_at: '2026-08-18T17:55:54Z'
+services:
+- nats
+- timescaledb
+- go-api
+- prometheus
+- postgres-exporter
+error: 'docker compose up -d --build nats timescaledb go-api prometheus postgres-exporter
+  failed: '
