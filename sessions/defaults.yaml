@@ -1,0 +1,31 @@
+# Starting characteristics for a new session.
+# A session may override any of these; comparisons stay fair
+# only when the envelope is kept the same.
+
+duration: 5m
+
+load:
+  profile: iot-steady
+  # empty = use the profile's own transport
+  transport: ""
+
+backends:
+  go: timescaledb
+  python: influxdb
+
+resources:
+  api:
+    cpus: "1.0"
+    memory: 512M
+  storage:
+    cpus: "1.0"
+    memory: 1G
+  bus:
+    cpus: "0.50"
+    memory: 256M
+  observe:
+    cpus: "0.50"
+    memory: 512M
+  generator:
+    cpus: "1.0"
+    memory: 512M

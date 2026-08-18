@@ -1,0 +1,9 @@
+sessions:
+- id: 20260818T174002-iot-steady
+  status: planned
+  created_at: '2026-08-18T17:40:02Z'
+  why: Базовый write-path на стартовом конверте — Go/Timescale vs Python/Influx, 5m,
+    iot-steady.
+  profile: iot-steady
+  duration: 5m
+  path: sessions/20260818T174002-iot-steady/session.yaml
