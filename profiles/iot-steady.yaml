@@ -1,0 +1,31 @@
+name: iot-steady
+description: Continuous IoT ingest with moderate cardinality. Baseline profile.
+
+transport: nats
+duration: 0
+
+ingest:
+  enabled: true
+  rate: 2000
+  batch: 100
+  workers: 1
+  metrics:
+    - cpu.usage
+    - mem.used
+    - disk.io
+    - net.rx
+    - net.tx
+  labels:
+    host:
+      prefix: dev-
+      count: 50
+      width: 3
+    site:
+      values: [lab]
+  out_of_order: 0.0
+  late_ms: 0
+
+query:
+  enabled: false
+  rate: 0
+  mix: []

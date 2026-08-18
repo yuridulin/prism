@@ -1,18 +1,16 @@
 # Prism
 
-Стенд для сравнения time-series стеков: один контракт, разные бэкенды и хранилища.
-
-Prism прогоняет одну и ту же нагрузку (ingest + range-query + latest) через:
+Стенд для сравнения time-series стеков: один контракт, декларативные профили нагрузки, три слоя метрик.
 
 | Слой | Варианты |
 | --- | --- |
 | API | Go (`:8081`), Python/FastAPI (`:8082`) |
 | Storage | TimescaleDB, ClickHouse, InfluxDB 2, VictoriaMetrics |
 | Шина | NATS JetStream |
-| Наблюдение | Prometheus + Grafana |
-| Нагрузка | генератор + k6 |
+| Наблюдение | Prometheus + Grafana + native exporters |
+| Нагрузка | YAML-профили → генератор или k6 |
 
-Хранилище выбирается переменной `PRISM_STORAGE`, без смены HTTP API.
+Хранилище выбирается `PRISM_STORAGE` / `GO_API_STORAGE` / `PYTHON_API_STORAGE`.
 
 ## Быстрый старт
 
@@ -23,88 +21,115 @@ copy .env.example .env
 docker compose up -d --build
 ```
 
-Проверка:
-
 ```powershell
 curl http://localhost:8081/v1/meta
-curl http://localhost:8082/v1/meta
-```
-
-Запись и чтение через Go → TimescaleDB:
-
-```powershell
 curl -X POST http://localhost:8081/v1/points -H "Content-Type: application/json" -d "{\"points\":[{\"metric\":\"cpu.usage\",\"value\":42.1,\"labels\":{\"host\":\"dev-001\"}}]}"
-curl "http://localhost:8081/v1/latest?metric=cpu.usage"
+curl -X POST http://localhost:8081/v1/latest -H "Content-Type: application/json" -d "{\"metric\":\"cpu.usage\"}"
 ```
-
-UI:
 
 - Grafana: http://localhost:3000 (`admin` / `prism`)
 - Prometheus: http://localhost:9090
-- NATS monitor: http://localhost:8222
+
+## Профили нагрузки
+
+Источник правды — `profiles/*.yaml`. Новый сценарий = новый файл, без правок генератора.
+
+| Профиль | Зачем |
+| --- | --- |
+| `iot-steady` | Базовый непрерывный ingest |
+| `high-cardinality` | Много серий, давление на индексы и теги |
+| `burst` | Короткий write-spike + небольшой out-of-order |
+| `query-mix` | Ingest + range/latest по HTTP |
+
+```powershell
+$env:LOAD_PROFILE="query-mix"
+docker compose --profile load run --rm generator
+```
+
+Локально:
+
+```powershell
+pip install -r ingest/generator/requirements.txt
+python ingest/generator/generator.py --list
+python ingest/generator/generator.py --profile burst --transport http --http-url http://localhost:8081
+python bench/run.py --profile query-mix --mode generator --base-url http://localhost:8081
+python bench/run.py --profile query-mix --mode k6 --base-url http://localhost:8081
+```
+
+Поля профиля (расширяется без смены кода):
+
+```yaml
+name: example
+transport: nats          # nats | http
+duration: 0              # секунды, 0 = пока не остановят
+ingest:
+  enabled: true
+  rate: 2000             # points/s
+  batch: 100
+  workers: 1
+  metrics: [cpu.usage]
+  labels:
+    host: { prefix: dev-, count: 50, width: 3 }
+    site: { values: [lab] }
+  out_of_order: 0.0
+  late_ms: 0
+query:
+  enabled: false
+  rate: 40
+  mix:
+    - { op: query, weight: 70, window: 15m, step: 1m, agg: avg }
+    - { op: latest, weight: 30 }
+```
+
+`TARGET` / `--transport` и `DURATION` перекрывают профиль, если заданы.
+
+## Контракт API
+
+Канонические методы — POST. GET оставлен для отладки. Ошибки всегда `{ "error": { "code", "message" } }`.
+
+```
+POST /v1/points     { "points": [...] }           → { "written": N }
+POST /v1/query      { metric, from, to, step, agg, labels }
+POST /v1/latest     { metric, labels }
+GET  /v1/meta       backend, storage, contract, ops
+```
+
+Коды ошибок: `invalid_request`, `not_found`, `storage_unavailable`, `storage_error`.
+
+Полный контракт: [contracts/openapi.yaml](contracts/openapi.yaml).
+
+## Метрики
+
+Три слоя с одинаковыми именами в Go и Python. Новый адаптер хранилища оборачивается в `Observed` / `ObservedStore` и сразу пишет storage-метрики.
+
+| Слой | Метрики | Что измеряет |
+| --- | --- | --- |
+| `api` | `prism_api_requests_total`, `prism_api_request_duration_seconds` | HTTP route/method/status |
+| `backend` | `prism_backend_ops_total`, `prism_backend_op_duration_seconds`, `prism_backend_items_total` | write/query/latest, source=`http`\|`nats` |
+| `storage` | `prism_storage_ops_total`, `prism_storage_op_duration_seconds`, `prism_storage_up` | вызов адаптера БД |
+
+Лейблы: `backend`, `storage`, `op`, `source`, `result` (`ok` / `error` / `not_found`).
+
+Native scrape рядом:
+
+- TimescaleDB — postgres-exporter
+- ClickHouse — `/metrics` на `:9363`
+- InfluxDB — `/metrics`
+- VictoriaMetrics — `/metrics`
+- NATS — monitor `:8222`
+
+Новая БД: адаптер + scrape job в `infra/prometheus/prometheus.yml`. Новый op: те же `ObserveBackend` / `observe_backend`.
 
 ## Сменить хранилище
-
-В `.env`:
 
 ```env
 GO_API_STORAGE=clickhouse
 PYTHON_API_STORAGE=victoriametrics
 ```
 
-Допустимые значения: `timescaledb`, `clickhouse`, `influxdb`, `victoriametrics`.
+Значения: `timescaledb`, `clickhouse`, `influxdb`, `victoriametrics`.
 
-Затем `docker compose up -d go-api python-api`.
-
-По умолчанию Go пишет в TimescaleDB, Python — в InfluxDB. Оба подписаны на одну NATS-тему разными queue groups, поэтому одна нагрузка попадает в оба хранилища.
-
-## Нагрузка
-
-Генератор (профиль `load`):
-
-```powershell
-docker compose --profile load up generator
-```
-
-Или локально в HTTP-режим:
-
-```powershell
-cd ingest/generator
-pip install -r requirements.txt
-python generator.py --target http --http-url http://localhost:8081 --rate 1000 --duration 30
-```
-
-k6:
-
-```powershell
-k6 run -e BASE_URL=http://localhost:8081 -e RATE=200 bench/k6/ingest.js
-k6 run -e BASE_URL=http://localhost:8081 bench/k6/query.js
-k6 run -e BASE_URL=http://localhost:8082 bench/k6/query.js
-```
-
-Сравнивать удобно по дашборду **Prism overview** в Grafana и по `prism_*` метрикам обоих API.
-
-## Контракт
-
-См. [contracts/openapi.yaml](contracts/openapi.yaml).
-
-```
-POST /v1/points     пачка точек
-GET  /v1/query      range + downsample (avg|min|max|sum|count)
-GET  /v1/latest     последняя точка
-GET  /v1/meta       какой backend/storage сейчас активен
-```
-
-Модель точки:
-
-```json
-{
-  "ts": "2026-08-18T16:00:00Z",
-  "metric": "cpu.usage",
-  "value": 42.5,
-  "labels": { "host": "dev-001", "site": "lab" }
-}
-```
+По умолчанию Go → TimescaleDB, Python → InfluxDB. Оба слушают одну NATS-тему разными queue groups.
 
 ## Порты
 
@@ -119,16 +144,3 @@ GET  /v1/meta       какой backend/storage сейчас активен
 | NATS / monitor | 4222 / 8222 |
 | Grafana | 3000 |
 | Prometheus | 9090 |
-
-## Структура
-
-```
-apps/go-api          Go HTTP + адаптеры всех 4 хранилищ + NATS
-apps/python-api      то же на FastAPI
-ingest/generator     синтетика (NATS или HTTP)
-bench/k6             ingest / query сценарии
-contracts/           OpenAPI
-infra/               init SQL, Prometheus, Grafana
-```
-
-Дальше по стенду: ещё один язык API, Kafka как альтернатива NATS, k8s-манифесты рядом с Compose, отдельные сценарии (высокая кардинальность, out-of-order, backfill).

@@ -1,0 +1,36 @@
+name: query-mix
+description: Mixed read/write. Range queries plus latest lookups on a warm ingest stream.
+
+transport: http
+duration: 0
+
+ingest:
+  enabled: true
+  rate: 500
+  batch: 50
+  workers: 1
+  metrics:
+    - cpu.usage
+    - mem.used
+    - disk.io
+  labels:
+    host:
+      prefix: dev-
+      count: 50
+      width: 3
+    site:
+      values: [lab]
+  out_of_order: 0.0
+  late_ms: 0
+
+query:
+  enabled: true
+  rate: 40
+  mix:
+    - op: query
+      weight: 70
+      window: 15m
+      step: 1m
+      agg: avg
+    - op: latest
+      weight: 30

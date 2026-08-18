@@ -42,7 +42,7 @@ func (c *Consumer) handle(msg *nats.Msg) {
 	if err := json.Unmarshal(msg.Data, &req); err != nil {
 		var one model.Point
 		if err2 := json.Unmarshal(msg.Data, &one); err2 != nil {
-			metrics.IngestErrors.WithLabelValues("go", c.store.Name()).Inc()
+			metrics.ObserveBackend(c.store.Name(), "write", "nats", 0, 0, err)
 			log.Printf("nats decode error: %v", err)
 			return
 		}
@@ -53,12 +53,12 @@ func (c *Consumer) handle(msg *nats.Msg) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := c.store.Write(ctx, req.Points); err != nil {
-		metrics.IngestErrors.WithLabelValues("go", c.store.Name()).Inc()
+	start := time.Now()
+	err := c.store.Write(ctx, req.Points)
+	metrics.ObserveBackend(c.store.Name(), "write", "nats", len(req.Points), time.Since(start), err)
+	if err != nil {
 		log.Printf("nats write error: %v", err)
-		return
 	}
-	metrics.IngestPoints.WithLabelValues("go", c.store.Name()).Add(float64(len(req.Points)))
 }
 
 func (c *Consumer) Close() {

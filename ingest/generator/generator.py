@@ -1,4 +1,4 @@
-"""Synthetic time-series load for the Prism stand."""
+"""Profile-driven load generator for the Prism stand."""
 
 from __future__ import annotations
 
@@ -10,31 +10,21 @@ import os
 import random
 import signal
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-import httpx
-import nats
-
-
-METRICS = ("cpu.usage", "mem.used", "disk.io", "net.rx", "net.tx")
+from profile import Profile, ProfileError, load_profile, list_profiles, pick_mix, random_labels
 
 
-def env(name: str, default: str) -> str:
-    return os.getenv(name, default)
-
-
-async def publish_nats(url: str, subject: str, payload: bytes) -> None:
-    nc = await nats.connect(url)
-    try:
-        await nc.publish(subject, payload)
-        await nc.flush()
-    finally:
-        await nc.drain()
+def env(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return value
 
 
 class Publisher:
-    def __init__(self, target: str, http_url: str, nats_url: str, subject: str) -> None:
-        self.target = target
+    def __init__(self, transport: str, http_url: str, nats_url: str, subject: str) -> None:
+        self.transport = transport
         self.http_url = http_url.rstrip("/")
         self.nats_url = nats_url
         self.subject = subject
@@ -42,20 +32,38 @@ class Publisher:
         self._nc = None
 
     async def start(self) -> None:
-        if self.target == "http":
-            self._http = httpx.AsyncClient(timeout=10.0)
-            return
-        self._nc = await nats.connect(self.nats_url, name="prism-generator")
+        import httpx
 
-    async def send(self, points: list[dict]) -> None:
+        self._http = httpx.AsyncClient(timeout=15.0)
+        if self.transport == "nats":
+            import nats
+
+            self._nc = await nats.connect(self.nats_url, name="prism-generator")
+
+    async def write(self, points: list[dict]) -> None:
         body = json.dumps({"points": points}).encode()
-        if self.target == "http":
+        if self.transport == "http":
             assert self._http is not None
-            resp = await self._http.post(f"{self.http_url}/v1/points", content=body, headers={"Content-Type": "application/json"})
+            resp = await self._http.post(
+                f"{self.http_url}/v1/points",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
             resp.raise_for_status()
             return
         assert self._nc is not None
         await self._nc.publish(self.subject, body)
+
+    async def query(self, payload: dict) -> None:
+        assert self._http is not None
+        resp = await self._http.post(f"{self.http_url}/v1/query", json=payload)
+        resp.raise_for_status()
+
+    async def latest(self, payload: dict) -> None:
+        assert self._http is not None
+        resp = await self._http.post(f"{self.http_url}/v1/latest", json=payload)
+        if resp.status_code not in {200, 404}:
+            resp.raise_for_status()
 
     async def close(self) -> None:
         if self._http is not None:
@@ -64,22 +72,88 @@ class Publisher:
             await self._nc.drain()
 
 
-def point(device: str, metric: str, now: datetime) -> dict:
-    phase = hash(device + metric) % 1000
+def make_point(profile: Profile, rng: random.Random, now: datetime) -> dict:
+    ts = now
+    ingest = profile.ingest
+    if ingest.out_of_order > 0 and rng.random() < ingest.out_of_order:
+        lag = rng.randint(1, max(ingest.late_ms, 1))
+        ts = now - timedelta(milliseconds=lag)
+    metric = rng.choice(ingest.metrics)
+    labels = random_labels(ingest.labels, rng)
+    phase = hash((metric, tuple(sorted(labels.items())))) % 1000
     wave = 50 + 40 * math.sin((now.timestamp() + phase) / 15)
-    noise = random.uniform(-4, 4)
     return {
-        "ts": now.isoformat(),
+        "ts": ts.isoformat().replace("+00:00", "Z"),
         "metric": metric,
-        "value": round(max(0.0, wave + noise), 4),
-        "labels": {"host": device, "site": "lab"},
+        "value": round(max(0.0, wave + rng.uniform(-4, 4)), 4),
+        "labels": labels,
     }
 
 
-async def run(args: argparse.Namespace) -> None:
-    pub = Publisher(args.target, args.http_url, args.nats_url, args.subject)
+def parse_window(raw: str) -> timedelta:
+    units = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
+    for suffix, mul in units.items():
+        if raw.endswith(suffix):
+            return timedelta(seconds=float(raw[: -len(suffix)]) * mul)
+    raise ProfileError(f"invalid window {raw!r}")
+
+
+async def ingest_worker(profile: Profile, pub: Publisher, stop: asyncio.Event, stats: dict) -> None:
+    spec = profile.ingest
+    interval = spec.batch / spec.rate if spec.rate > 0 else 1.0
+    rng = random.Random()
+    while not stop.is_set():
+        tick = datetime.now(timezone.utc)
+        batch = [make_point(profile, rng, tick) for _ in range(spec.batch)]
+        try:
+            await pub.write(batch)
+            stats["written"] += len(batch)
+        except Exception as exc:
+            stats["write_errors"] += 1
+            print(f"ingest error: {exc}", flush=True)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except TimeoutError:
+            pass
+
+
+async def query_worker(profile: Profile, pub: Publisher, stop: asyncio.Event, stats: dict) -> None:
+    spec = profile.query
+    interval = 1.0 / spec.rate if spec.rate > 0 else 1.0
+    rng = random.Random()
+    while not stop.is_set():
+        item = pick_mix(spec.mix, rng)
+        metric = rng.choice(profile.ingest.metrics)
+        labels = random_labels(profile.ingest.labels, rng)
+        try:
+            if item.op == "latest":
+                await pub.latest({"metric": metric, "labels": labels})
+            else:
+                end = datetime.now(timezone.utc)
+                start = end - parse_window(item.window)
+                await pub.query(
+                    {
+                        "metric": metric,
+                        "from": start.isoformat().replace("+00:00", "Z"),
+                        "to": end.isoformat().replace("+00:00", "Z"),
+                        "step": item.step,
+                        "agg": item.agg,
+                        "labels": labels,
+                    }
+                )
+            stats["queries"] += 1
+        except Exception as exc:
+            stats["query_errors"] += 1
+            print(f"query error: {exc}", flush=True)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except TimeoutError:
+            pass
+
+
+async def run(profile: Profile, args: argparse.Namespace) -> None:
+    pub = Publisher(args.transport, args.http_url, args.nats_url, args.subject)
     await pub.start()
-    devices = [f"dev-{i:03d}" for i in range(args.devices)]
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -88,47 +162,70 @@ async def run(args: argparse.Namespace) -> None:
         except NotImplementedError:
             pass
 
-    batch_size = max(args.batch, 1)
-    interval = batch_size / args.rate if args.rate > 0 else 1
-    sent = 0
+    stats = {"written": 0, "write_errors": 0, "queries": 0, "query_errors": 0}
     started = time.monotonic()
-    deadline = started + args.duration if args.duration > 0 else None
+    if args.duration > 0:
+        loop.call_later(args.duration, stop.set)
+
+    tasks: list[asyncio.Task] = []
+    if profile.ingest.enabled and profile.ingest.rate > 0:
+        for _ in range(profile.ingest.workers):
+            tasks.append(asyncio.create_task(ingest_worker(profile, pub, stop, stats)))
+    if profile.query.enabled and profile.query.rate > 0:
+        tasks.append(asyncio.create_task(query_worker(profile, pub, stop, stats)))
+    if not tasks:
+        raise ProfileError("nothing to run: enable ingest or query with a non-zero rate")
 
     print(
-        f"generator target={args.target} rate={args.rate}/s devices={args.devices} "
-        f"batch={batch_size} duration={args.duration or 'inf'}",
+        f"generator profile={profile.name} transport={args.transport} "
+        f"ingest={profile.ingest.rate}/s query={profile.query.rate}/s "
+        f"series≈{profile.sample_space_size()} duration={args.duration or 'inf'}",
         flush=True,
     )
     try:
-        while not stop.is_set():
-            if deadline is not None and time.monotonic() >= deadline:
-                break
-            tick = datetime.now(timezone.utc)
-            batch = [
-                point(random.choice(devices), random.choice(METRICS), tick)
-                for _ in range(batch_size)
-            ]
-            await pub.send(batch)
-            sent += len(batch)
-            await asyncio.sleep(interval)
+        await stop.wait()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         elapsed = max(time.monotonic() - started, 1e-6)
-        print(f"generator done sent={sent} elapsed={elapsed:.1f}s rate={sent / elapsed:.1f}/s", flush=True)
+        print(
+            f"generator done profile={profile.name} written={stats['written']} "
+            f"queries={stats['queries']} write_errors={stats['write_errors']} "
+            f"query_errors={stats['query_errors']} elapsed={elapsed:.1f}s "
+            f"ingest_rate={stats['written'] / elapsed:.1f}/s",
+            flush=True,
+        )
         await pub.close()
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Prism time-series load generator")
-    p.add_argument("--target", default=env("TARGET", "nats"), choices=("nats", "http"))
-    p.add_argument("--http-url", default=env("HTTP_URL", "http://localhost:8081"))
-    p.add_argument("--nats-url", default=env("NATS_URL", "nats://localhost:4222"))
-    p.add_argument("--subject", default=env("NATS_SUBJECT", "prism.points"))
-    p.add_argument("--rate", type=float, default=float(env("RATE", "2000")))
-    p.add_argument("--devices", type=int, default=int(env("DEVICES", "50")))
-    p.add_argument("--batch", type=int, default=int(env("BATCH", "100")))
-    p.add_argument("--duration", type=float, default=float(env("DURATION", "0")))
-    return p.parse_args()
+    parser = argparse.ArgumentParser(description="Prism profile-driven load generator")
+    parser.add_argument("--profile", default=env("PROFILE", "iot-steady"))
+    parser.add_argument("--profiles-dir", default=env("PROFILES_DIR"))
+    parser.add_argument("--list", action="store_true")
+    parser.add_argument("--transport", default=env("TARGET") or "", choices=("", "nats", "http"))
+    parser.add_argument("--http-url", default=env("HTTP_URL", "http://localhost:8081"))
+    parser.add_argument("--nats-url", default=env("NATS_URL", "nats://localhost:4222"))
+    parser.add_argument("--subject", default=env("NATS_SUBJECT", "prism.points"))
+    parser.add_argument("--duration", type=float, default=None)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    root = args.profiles_dir
+    if args.list:
+        print("\n".join(list_profiles(root)))
+        return
+    profile = load_profile(args.profile, root)
+    if not args.transport:
+        args.transport = profile.transport
+    if args.duration is None:
+        override = env("DURATION")
+        args.duration = float(override) if override is not None else profile.duration
+    asyncio.run(run(profile, args))
 
 
 if __name__ == "__main__":
-    asyncio.run(run(parse_args()))
+    main()

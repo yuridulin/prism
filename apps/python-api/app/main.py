@@ -4,13 +4,16 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import PlainTextResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import SUPPORTED, settings
-from app.metrics import INGEST_ERRORS, INGEST_POINTS, QUERY_DURATION, QUERY_ERRORS
-from app.models import Meta, Point, QueryResult, WriteRequest
+from app.errors import http_error_handler, validation_error_handler
+from app.metrics import observe_api, observe_backend, track
+from app.models import CONTRACT, OPS, LatestRequest, Meta, Point, QueryRequest, QueryResult, WriteRequest, WriteResponse
 from app.nats_consumer import run_consumer
 from app.store import create_store
 from app.store.base import Store
@@ -40,6 +43,20 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Prism Python API", lifespan=lifespan)
+app.add_exception_handler(StarletteHTTPException, http_error_handler)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+
+
+@app.middleware("http")
+async def api_metrics(request: Request, call_next):
+    path = request.url.path
+    if path in {"/metrics", "/healthz", "/readyz"}:
+        return await call_next(request)
+    with track() as elapsed:
+        response = await call_next(request)
+    route = path.strip("/").replace("/", "_") or "root"
+    observe_api(store.name, route, request.method, str(response.status_code), elapsed())
+    return response
 
 
 @app.get("/healthz", response_class=PlainTextResponse)
@@ -57,17 +74,17 @@ async def readyz() -> str:
 
 
 @app.get("/metrics")
-async def metrics() -> Response:
+async def metrics_endpoint() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/v1/meta", response_model=Meta)
 async def meta() -> Meta:
-    return Meta(backend="python", storage=store.name, storages=SUPPORTED)
+    return Meta(backend="python", storage=store.name, storages=SUPPORTED, contract=CONTRACT, ops=OPS)
 
 
-@app.post("/v1/points", status_code=204)
-async def write_points(req: WriteRequest) -> Response:
+@app.post("/v1/points", response_model=WriteResponse)
+async def write_points(req: WriteRequest) -> WriteResponse:
     if not req.points:
         raise HTTPException(status_code=400, detail="points is required")
     now = datetime.now(timezone.utc)
@@ -76,17 +93,23 @@ async def write_points(req: WriteRequest) -> Response:
             p.ts = p.ts.replace(tzinfo=timezone.utc)
         if p.ts.timestamp() == 0:
             p.ts = now
-    try:
-        await store.write(req.points)
-    except Exception as exc:
-        INGEST_ERRORS.labels("python", store.name).inc()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    INGEST_POINTS.labels("python", store.name).inc(len(req.points))
-    return Response(status_code=204)
+    with track() as elapsed:
+        try:
+            await store.write(req.points)
+        except Exception as exc:
+            observe_backend(store.name, "write", "http", 0, elapsed(), exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    observe_backend(store.name, "write", "http", len(req.points), elapsed())
+    return WriteResponse(written=len(req.points))
+
+
+@app.post("/v1/query", response_model=QueryResult)
+async def query_post(req: QueryRequest) -> QueryResult:
+    return await _query(req)
 
 
 @app.get("/v1/query", response_model=QueryResult)
-async def query_points(
+async def query_get(
     metric: str,
     from_: datetime = Query(alias="from"),
     to: datetime = Query(),
@@ -94,48 +117,76 @@ async def query_points(
     agg: str = "avg",
     labels: str | None = None,
 ) -> QueryResult:
-    if agg not in {"avg", "min", "max", "sum", "count"}:
-        raise HTTPException(status_code=400, detail="invalid agg")
-    try:
-        step_td = _parse_step(step)
-        parsed_labels = json.loads(labels) if labels else {}
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    with QUERY_DURATION.labels("python", store.name).time():
-        try:
-            return await store.query(metric, from_, to, step_td, agg, parsed_labels)
-        except Exception as exc:
-            QUERY_ERRORS.labels("python", store.name).inc()
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    parsed = _parse_labels(labels)
+    return await _query(QueryRequest.model_validate({
+        "metric": metric,
+        "from": from_,
+        "to": to,
+        "step": step,
+        "agg": agg,
+        "labels": parsed,
+    }))
+
+
+@app.post("/v1/latest", response_model=Point)
+async def latest_post(req: LatestRequest) -> Point:
+    return await _latest(req)
 
 
 @app.get("/v1/latest", response_model=Point)
-async def latest(metric: str, labels: str | None = None) -> Point:
+async def latest_get(metric: str, labels: str | None = None) -> Point:
+    return await _latest(LatestRequest(metric=metric, labels=_parse_labels(labels)))
+
+
+async def _query(req: QueryRequest) -> QueryResult:
+    if req.agg not in {"avg", "min", "max", "sum", "count"}:
+        raise HTTPException(status_code=400, detail="invalid agg")
     try:
-        parsed_labels = json.loads(labels) if labels else {}
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="labels must be a JSON object") from exc
-    with QUERY_DURATION.labels("python", store.name).time():
+        step_td = _parse_step(req.step)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with track() as elapsed:
         try:
-            point = await store.latest(metric, parsed_labels)
+            result = await store.query(req.metric, req.from_, req.to, step_td, req.agg, req.labels or {})
         except Exception as exc:
-            QUERY_ERRORS.labels("python", store.name).inc()
+            observe_backend(store.name, "query", "http", 0, elapsed(), exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    result.step = req.step or "1m"
+    observe_backend(store.name, "query", "http", len(result.points), elapsed())
+    return result
+
+
+async def _latest(req: LatestRequest) -> Point:
+    with track() as elapsed:
+        try:
+            point = await store.latest(req.metric, req.labels or {})
+        except Exception as exc:
+            observe_backend(store.name, "latest", "http", 0, elapsed(), exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
     if point is None:
+        observe_backend(store.name, "latest", "http", 0, elapsed(), not_found=True)
         raise HTTPException(status_code=404, detail="not found")
+    observe_backend(store.name, "latest", "http", 1, elapsed())
     return point
 
 
-def _parse_step(raw: str) -> timedelta:
+def _parse_labels(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
     try:
-        return timedelta(seconds=int(raw.rstrip("s"))) if raw.endswith("s") and raw[:-1].isdigit() else _parse_go_duration(raw)
-    except ValueError as exc:
-        raise ValueError("invalid step") from exc
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="labels must be a JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="labels must be a JSON object")
+    return {str(k): str(v) for k, v in parsed.items()}
 
 
-def _parse_go_duration(raw: str) -> timedelta:
+def _parse_step(raw: str) -> timedelta:
     units = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
     for suffix, mul in units.items():
         if raw.endswith(suffix):
             return timedelta(seconds=float(raw[: -len(suffix)]) * mul)
+    if raw.isdigit():
+        return timedelta(seconds=int(raw))
     raise ValueError("invalid step")

@@ -2,14 +2,14 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
+	"prism/go-api/internal/apperr"
 	"prism/go-api/internal/config"
 	"prism/go-api/internal/model"
 )
 
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = apperr.ErrNotFound
 
 var Supported = []string{"timescaledb", "clickhouse", "influxdb", "victoriametrics"}
 
@@ -23,18 +23,26 @@ type Store interface {
 }
 
 func New(cfg config.Config) (Store, error) {
+	var (
+		inner Store
+		err   error
+	)
 	switch cfg.Storage {
 	case "timescaledb":
-		return NewTimescale(cfg.PostgresDSN)
+		inner, err = NewTimescale(cfg.PostgresDSN)
 	case "clickhouse":
-		return NewClickHouse(cfg.ClickHouseDSN)
+		inner, err = NewClickHouse(cfg.ClickHouseDSN)
 	case "influxdb":
-		return NewInflux(cfg)
+		inner, err = NewInflux(cfg)
 	case "victoriametrics":
-		return NewVictoriaMetrics(cfg.VMURL)
+		inner, err = NewVictoriaMetrics(cfg.VMURL)
 	default:
 		return nil, fmt.Errorf("unsupported storage %q", cfg.Storage)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return Observe(inner), nil
 }
 
 func aggSQL(agg string) string {

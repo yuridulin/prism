@@ -1,9 +1,7 @@
 import http from "k6/http";
 import { check } from "k6";
-import { Trend } from "k6/metrics";
 
 const BASE = __ENV.BASE_URL || "http://localhost:8081";
-const writeLatency = new Trend("prism_write_ms");
 
 export const options = {
   scenarios: {
@@ -19,23 +17,18 @@ export const options = {
 };
 
 export default function () {
-  const now = new Date().toISOString();
-  const host = `dev-${Math.floor(Math.random() * 50)
-    .toString()
-    .padStart(3, "0")}`;
   const payload = JSON.stringify({
     points: [
       {
-        ts: now,
+        ts: new Date().toISOString(),
         metric: "cpu.usage",
         value: Math.random() * 100,
-        labels: { host, site: "lab" },
+        labels: { host: "dev-001", site: "lab" },
       },
     ],
   });
   const res = http.post(`${BASE}/v1/points`, payload, {
     headers: { "Content-Type": "application/json" },
   });
-  writeLatency.add(res.timings.duration);
-  check(res, { "written": (r) => r.status === 204 });
+  check(res, { written: (r) => r.status === 200 });
 }

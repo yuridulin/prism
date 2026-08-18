@@ -33,6 +33,7 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
     healthcheck:
       test: ["CMD", "clickhouse-client", "--user", "${CLICKHOUSE_USER:-prism}", "--password", "${CLICKHOUSE_PASSWORD:-prism}", "--query", "SELECT 1"]
       interval: 5s
@@ -103,6 +104,8 @@ services:
       go-api:
         condition: service_started
       python-api:
+        condition: service_started
+      postgres-exporter:
         condition: service_started
 
   grafana:
@@ -189,18 +192,29 @@ services:
       nats:
         condition: service_started
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@timescaledb:5432/${POSTGRES_DB:-prism}?sslmode=disable
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
   generator:
     build:
       context: ./ingest/generator
     profiles: ["load"]
     environment:
-      TARGET: ${GENERATOR_TARGET:-nats}
+      PROFILE: ${LOAD_PROFILE:-iot-steady}
+      PROFILES_DIR: /profiles
+      TARGET: ${GENERATOR_TARGET:-}
       HTTP_URL: http://go-api:8081
       NATS_URL: nats://nats:4222
       NATS_SUBJECT: ${NATS_SUBJECT:-prism.points}
-      RATE: ${GENERATOR_RATE:-2000}
-      DEVICES: ${GENERATOR_DEVICES:-50}
-      DURATION: ${GENERATOR_DURATION:-0}
+      DURATION: ${GENERATOR_DURATION:-}
+    volumes:
+      - ./profiles:/profiles:ro
     depends_on:
       nats:
         condition: service_started

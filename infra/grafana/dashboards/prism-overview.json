@@ -9,69 +9,113 @@
   "panels": [
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": { "unit": "ops" },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
-      "title": "Ingest rate (points/s)",
+      "title": "API request rate",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "rate(prism_ingest_points_total[30s])",
-          "legendFormat": "{{backend}} / {{storage}}"
+          "expr": "sum by (backend, storage, route) (rate(prism_api_requests_total[30s]))",
+          "legendFormat": "{{backend}} / {{storage}} / {{route}}"
         }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": { "unit": "s" },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
-      "title": "Query latency (p95)",
+      "title": "API latency p95",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, backend, storage) (rate(prism_query_duration_seconds_bucket[1m])))",
-          "legendFormat": "{{backend}} / {{storage}}"
+          "expr": "histogram_quantile(0.95, sum by (le, backend, storage, route) (rate(prism_api_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "{{backend}} / {{storage}} / {{route}}"
         }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": { "unit": "short" },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "id": 3,
-      "title": "Ingest errors",
+      "title": "Backend ingest (points/s)",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "increase(prism_ingest_errors_total[1m])",
+          "expr": "sum by (backend, storage, source) (rate(prism_backend_items_total{op=\"write\"}[30s]))",
+          "legendFormat": "{{backend}} / {{storage}} / {{source}}"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "title": "Backend op latency p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, backend, storage, op) (rate(prism_backend_op_duration_seconds_bucket[1m])))",
+          "legendFormat": "{{backend}} / {{storage}} / {{op}}"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "title": "Storage adapter latency p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, backend, storage, op) (rate(prism_storage_op_duration_seconds_bucket[1m])))",
+          "legendFormat": "{{backend}} / {{storage}} / {{op}}"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "max": 1, "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "title": "Storage up (from API ping)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "prism_storage_up",
           "legendFormat": "{{backend}} / {{storage}}"
         }
       ]
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": { "unit": "short" },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "id": 4,
-      "title": "Query errors",
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 7,
+      "title": "Backend errors",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "increase(prism_query_errors_total[1m])",
-          "legendFormat": "{{backend}} / {{storage}}"
+          "expr": "sum by (backend, storage, op, result) (rate(prism_backend_ops_total{result!=\"ok\"}[1m]))",
+          "legendFormat": "{{backend}} / {{storage}} / {{op}} / {{result}}"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 8,
+      "title": "Timescale connections",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "pg_stat_database_numbackends{datname=\"prism\"}",
+          "legendFormat": "backends"
         }
       ]
     }
@@ -85,5 +129,5 @@
   "timezone": "browser",
   "title": "Prism overview",
   "uid": "prism-overview",
-  "version": 1
+  "version": 2
 }
