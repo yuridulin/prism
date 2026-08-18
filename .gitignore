@@ -1,0 +1,38 @@
+# Env and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Go
+apps/go-api/bin/
+ingest/generator/bin/
+*.exe
+*.test
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node / k6 leftovers
+node_modules/
+
+# Data volumes (if someone bind-mounts)
+data/
+*.log

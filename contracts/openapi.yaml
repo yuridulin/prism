@@ -1,0 +1,160 @@
+openapi: 3.1.0
+info:
+  title: Prism Time-Series API
+  version: 0.1.0
+  description: |
+    Единый контракт для всех бэкендов стенда.
+    Хранилище выбирается переменной `PRISM_STORAGE`.
+servers:
+  - url: http://localhost:8081
+    description: Go API
+  - url: http://localhost:8082
+    description: Python API
+paths:
+  /healthz:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+  /readyz:
+    get:
+      summary: Readiness (хранилище доступно)
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Storage unavailable
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Exposition format
+  /v1/meta:
+    get:
+      summary: Какой бэкенд и storage сейчас активны
+      responses:
+        "200":
+          description: Meta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meta"
+  /v1/points:
+    post:
+      summary: Записать точки (одна или пачка)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WriteRequest"
+      responses:
+        "204":
+          description: Written
+        "400":
+          description: Invalid payload
+  /v1/query:
+    get:
+      summary: Range-query с даунсемплом
+      parameters:
+        - in: query
+          name: metric
+          required: true
+          schema: { type: string }
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: step
+          schema: { type: string, default: 1m, examples: ["15s", "1m", "5m"] }
+        - in: query
+          name: agg
+          schema: { type: string, enum: [avg, min, max, sum, count], default: avg }
+        - in: query
+          name: labels
+          description: JSON-объект фильтров, например {"host":"dev-1"}
+          schema: { type: string }
+      responses:
+        "200":
+          description: Series
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResult"
+  /v1/latest:
+    get:
+      summary: Последняя точка метрики
+      parameters:
+        - in: query
+          name: metric
+          required: true
+          schema: { type: string }
+        - in: query
+          name: labels
+          schema: { type: string }
+      responses:
+        "200":
+          description: Point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Point"
+        "404":
+          description: Not found
+components:
+  schemas:
+    Point:
+      type: object
+      required: [ts, metric, value]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        metric:
+          type: string
+          examples: ["cpu.usage"]
+        value:
+          type: number
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+    WriteRequest:
+      type: object
+      properties:
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/Point"
+      required: [points]
+    QueryResult:
+      type: object
+      required: [metric, agg, step, points]
+      properties:
+        metric: { type: string }
+        agg: { type: string }
+        step: { type: string }
+        points:
+          type: array
+          items:
+            type: object
+            required: [ts, value]
+            properties:
+              ts: { type: string, format: date-time }
+              value: { type: number }
+    Meta:
+      type: object
+      properties:
+        backend: { type: string }
+        storage: { type: string }
+        storages:
+          type: array
+          items: { type: string }
