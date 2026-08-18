@@ -1,6 +1,5 @@
 # Starting characteristics for a new session.
-# A session may override any of these; comparisons stay fair
-# only when the envelope is kept the same.
+# Pairs run one after another: clean start → load → record → wipe volumes.
 
 duration: 5m
 
@@ -9,9 +8,9 @@ load:
   # empty = use the profile's own transport
   transport: ""
 
-backends:
-  go: timescaledb
-  python: influxdb
+pairs:
+  - { backend: go, storage: timescaledb }
+  - { backend: python, storage: influxdb }
 
 resources:
   api:

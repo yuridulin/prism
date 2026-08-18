@@ -4,16 +4,16 @@ when:
   created_at: '2026-08-18T17:40:02Z'
   started_at: null
   finished_at: null
-why: Базовый write-path на стартовом конверте — Go/Timescale vs Python/Influx, 5m, iot-steady.
+why: Базовый write-path на стартовом конверте — пары по очереди, Go/Timescale затем Python/Influx.
 what:
   duration: 5m
   duration_seconds: 300
   load:
     profile: iot-steady
     transport: ''
-  backends:
-    go: timescaledb
-    python: influxdb
+  pairs:
+    - { backend: go, storage: timescaledb }
+    - { backend: python, storage: influxdb }
   resources:
     api:
       cpus: '1.0'
@@ -30,5 +30,6 @@ what:
     generator:
       cpus: '1.0'
       memory: 512M
-results: {}
+results:
+  pairs: {}
 conclusions: ''

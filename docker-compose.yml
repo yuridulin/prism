@@ -100,13 +100,7 @@ services:
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    depends_on:
-      go-api:
-        condition: service_started
-      python-api:
-        condition: service_started
-      postgres-exporter:
-        condition: service_started
+    # Dispatcher starts only the active pair; do not pull unused APIs/DBs.
 
   grafana:
     image: grafana/grafana:11.3.0
@@ -126,10 +120,6 @@ services:
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
-      - timescaledb
-      - clickhouse
-      - influxdb
-      - victoriametrics
 
   go-api:
     build:
@@ -150,14 +140,6 @@ services:
     ports:
       - "${GO_API_PORT:-8081}:8081"
     depends_on:
-      timescaledb:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-      influxdb:
-        condition: service_healthy
-      victoriametrics:
-        condition: service_started
       nats:
         condition: service_started
 
@@ -181,14 +163,6 @@ services:
     ports:
       - "${PYTHON_API_PORT:-8082}:8082"
     depends_on:
-      timescaledb:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-      influxdb:
-        condition: service_healthy
-      victoriametrics:
-        condition: service_started
       nats:
         condition: service_started
 
@@ -209,7 +183,7 @@ services:
       PROFILE: ${LOAD_PROFILE:-iot-steady}
       PROFILES_DIR: /profiles
       TARGET: ${GENERATOR_TARGET:-}
-      HTTP_URL: http://go-api:8081
+      HTTP_URL: ${GENERATOR_HTTP_URL:-http://go-api:8081}
       NATS_URL: nats://nats:4222
       NATS_SUBJECT: ${NATS_SUBJECT:-prism.points}
       DURATION: ${GENERATOR_DURATION:-}
@@ -217,8 +191,6 @@ services:
       - ./profiles:/profiles:ro
     depends_on:
       nats:
-        condition: service_started
-      go-api:
         condition: service_started
 
 volumes:

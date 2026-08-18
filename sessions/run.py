@@ -1,4 +1,4 @@
-"""Create and run Prism sessions through Docker."""
+"""Dispatch Prism sessions: one pair at a time, clean start each time."""
 
 from __future__ import annotations
 
@@ -18,15 +18,21 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from session import (  # noqa: E402
+    API_META,
+    API_READY,
     SessionError,
     draft_conclusions,
+    dump_yaml,
     load_session,
     list_session_ids,
     new_session,
+    normalize_pair,
+    pair_dir,
+    pair_services,
+    pair_slug,
     parse_generator_output,
     rebuild_catalog,
     save_session,
-    session_dir,
     utcnow,
     write_compose_env,
 )
@@ -53,6 +59,10 @@ def compose_checked(args: list[str], env_file: Path | None = None, capture: bool
         raise SessionError(f"docker compose {' '.join(args)} failed: {detail}")
 
 
+def wipe_stack(env_file: Path | None = None) -> None:
+    compose(["--profile", "load", "down", "-v", "--remove-orphans"], env_file, capture=False)
+
+
 def http_get(url: str, timeout: float = 5.0) -> tuple[int, str]:
     req = urllib.request.Request(url, method="GET")
     try:
@@ -64,20 +74,19 @@ def http_get(url: str, timeout: float = 5.0) -> tuple[int, str]:
         raise SessionError(f"request failed {url}: {exc}") from exc
 
 
-def wait_ready(timeout: int = 180) -> None:
+def wait_ready(url: str, timeout: int = 180) -> None:
     deadline = time.time() + timeout
     last = ""
     while time.time() < deadline:
         try:
-            go_status, _ = http_get("http://127.0.0.1:8081/readyz")
-            py_status, _ = http_get("http://127.0.0.1:8082/readyz")
-            if go_status == 200 and py_status == 200:
+            status, body = http_get(url)
+            if status == 200:
                 return
-            last = f"go={go_status} python={py_status}"
+            last = f"{status} {body[:80]}"
         except SessionError as exc:
             last = str(exc)
         time.sleep(3)
-    raise SessionError(f"APIs not ready after {timeout}s ({last})")
+    raise SessionError(f"not ready after {timeout}s ({url}: {last})")
 
 
 def promql(query: str) -> list[dict]:
@@ -94,79 +103,57 @@ def scalar(row: dict) -> float | None:
     return float(value)
 
 
-def collect_prometheus(window: str) -> list[dict]:
-    def by_pair(query: str) -> dict[tuple[str, str], float | None]:
-        out: dict[tuple[str, str], float | None] = {}
-        for row in promql(query):
-            metric = row.get("metric") or {}
-            key = (str(metric.get("backend") or ""), str(metric.get("storage") or ""))
-            out[key] = scalar(row)
-        return out
+def collect_prometheus(window: str, backend: str, storage: str) -> list[dict]:
+    match = f'backend="{backend}",storage="{storage}"'
 
-    ingest = by_pair(f'sum by (backend, storage) (rate(prism_backend_items_total{{op="write"}}[{window}]))')
-    errors = by_pair(
-        f'sum by (backend, storage) (rate(prism_backend_ops_total{{op="write",result="error"}}[{window}]))'
-    )
-    p95 = by_pair(
-        "histogram_quantile(0.95, "
-        f'sum by (le, backend, storage) (rate(prism_backend_op_duration_seconds_bucket{{op="write"}}[{window}])))'
-    )
-    keys = sorted(set(ingest) | set(errors) | set(p95))
+    def first(query: str) -> float | None:
+        rows = promql(query)
+        return scalar(rows[0]) if rows else None
+
     return [
         {
             "backend": backend,
             "storage": storage,
-            "ingest_rate": ingest.get((backend, storage)),
-            "write_error_rate": errors.get((backend, storage)),
-            "write_p95_seconds": p95.get((backend, storage)),
+            "ingest_rate": first(f'sum(rate(prism_backend_items_total{{op="write",{match}}}[{window}]))'),
+            "write_error_rate": first(
+                f'sum(rate(prism_backend_ops_total{{op="write",result="error",{match}}}[{window}]))'
+            ),
+            "write_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_backend_op_duration_seconds_bucket{{op="write",{match}}}[{window}])))'
+            ),
         }
-        for backend, storage in keys
     ]
 
 
-def collect_meta() -> dict:
-    out = {}
-    for name, url in (("go", "http://127.0.0.1:8081/v1/meta"), ("python", "http://127.0.0.1:8082/v1/meta")):
-        try:
-            status, body = http_get(url)
-            out[name] = json.loads(body) if status == 200 else {"status": status, "body": body}
-        except SessionError as exc:
-            out[name] = {"error": str(exc)}
-    return out
-
-
-def cmd_new(args: argparse.Namespace) -> int:
-    session = new_session(
-        why=args.why,
-        profile=args.profile,
-        duration=args.duration,
-        transport=args.transport,
-        go_storage=args.go_storage,
-        python_storage=args.python_storage,
-    )
-    path = save_session(session)
-    write_compose_env(session)
-    print(f"created {session['id']} ({path})")
-    if args.run:
-        return cmd_run(argparse.Namespace(id=session["id"], down=args.down, no_up=False))
-    return 0
-
-
-def cmd_run(args: argparse.Namespace) -> int:
-    session_id = args.id or _latest_planned()
-    session = load_session(session_id)
-    env_file = write_compose_env(session)
-    work = session_dir(session_id)
-    session["status"] = "running"
-    session["when"]["started_at"] = utcnow()
-    save_session(session)
-    print(f"running {session_id} duration={session['what']['duration']} profile={session['what']['load']['profile']}")
+def collect_meta(backend: str) -> dict:
     try:
-        if not args.no_up:
-            print("starting stack with session resource envelope")
-            compose_checked(["up", "-d", "--build"], env_file, capture=False)
-            wait_ready()
+        status, body = http_get(API_META[backend])
+        return json.loads(body) if status == 200 else {"status": status, "body": body}
+    except SessionError as exc:
+        return {"error": str(exc)}
+
+
+def run_pair(session: dict, pair: dict) -> dict:
+    slug = pair_slug(pair)
+    work = pair_dir(session["id"], pair)
+    env_file = write_compose_env(session, pair)
+    services = pair_services(pair)
+    record = {
+        "backend": pair["backend"],
+        "storage": pair["storage"],
+        "status": "running",
+        "when": {"started_at": utcnow(), "finished_at": None},
+        "services": services,
+    }
+    print(f"pair {slug}: wipe → up {', '.join(services)}")
+    wipe_stack(env_file)
+    try:
+        compose_checked(["up", "-d", "--build", *services], env_file, capture=False)
+        wait_ready(API_READY[pair["backend"]])
+        wait_ready("http://127.0.0.1:9090/-/ready")
         window = session["what"]["duration"]
+        print(f"pair {slug}: load {window}")
         proc = compose(
             ["--profile", "load", "run", "--rm", "--no-deps", "generator"],
             env_file,
@@ -176,41 +163,96 @@ def cmd_run(args: argparse.Namespace) -> int:
         (work / "generator.out").write_text(output, encoding="utf-8")
         if proc.returncode != 0:
             raise SessionError(f"generator exited {proc.returncode}\n{output[-2000:]}")
-        results = {
-            "generator": parse_generator_output(output),
-            "meta": collect_meta(),
-        }
+        record["generator"] = parse_generator_output(output)
+        record["meta"] = collect_meta(pair["backend"])
         try:
-            results["prometheus"] = collect_prometheus(window)
+            record["prometheus"] = collect_prometheus(window, pair["backend"], pair["storage"])
         except SessionError as exc:
-            results["prometheus_error"] = str(exc)
-        session["results"] = results
-        if not session.get("conclusions"):
+            record["prometheus_error"] = str(exc)
+        record["status"] = "completed"
+    except Exception as exc:
+        record["status"] = "failed"
+        record["error"] = str(exc)
+        print(f"pair {slug}: failed: {exc}", file=sys.stderr)
+    finally:
+        record["when"]["finished_at"] = utcnow()
+        dump_yaml(work / "pair.yaml", record)
+        print(f"pair {slug}: cleanup")
+        wipe_stack(env_file)
+    return record
+
+
+def cmd_new(args: argparse.Namespace) -> int:
+    session = new_session(
+        why=args.why,
+        profile=args.profile,
+        duration=args.duration,
+        transport=args.transport,
+        pairs=args.pairs,
+    )
+    path = save_session(session)
+    print(f"created {session['id']} ({path})")
+    print("pairs: " + ", ".join(pair_slug(p) for p in session["what"]["pairs"]))
+    if args.run:
+        return cmd_run(argparse.Namespace(id=session["id"], from_pair=None, fail_fast=args.fail_fast))
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    session_id = args.id or _latest_planned()
+    session = load_session(session_id)
+    pairs = [normalize_pair(p) for p in session["what"]["pairs"]]
+    if not pairs:
+        raise SessionError("session has no pairs")
+    slugs = [pair_slug(p) for p in pairs]
+    start_at = 0
+    if args.from_pair:
+        if args.from_pair not in slugs:
+            raise SessionError(f"unknown pair {args.from_pair!r}")
+        start_at = slugs.index(args.from_pair)
+    session["status"] = "running"
+    session["when"]["started_at"] = session["when"].get("started_at") or utcnow()
+    session.setdefault("results", {}).setdefault("pairs", {})
+    save_session(session)
+    print(
+        f"dispatch {session_id} duration={session['what']['duration']} "
+        f"profile={session['what']['load']['profile']} pairs={', '.join(slugs[start_at:])}"
+    )
+    failed = False
+    try:
+        for pair in pairs[start_at:]:
+            slug = pair_slug(pair)
+            record = run_pair(session, pair)
+            session["results"]["pairs"][slug] = record
             session["conclusions"] = draft_conclusions(session)
-        session["status"] = "completed"
+            save_session(session)
+            if record.get("status") != "completed":
+                failed = True
+                if args.fail_fast:
+                    raise SessionError(f"pair {slug} failed, stopping")
+        session["status"] = "failed" if failed else "completed"
         session["when"]["finished_at"] = utcnow()
+        session["conclusions"] = draft_conclusions(session)
         save_session(session)
-        print(f"completed {session_id}")
-        if args.down:
-            compose(["--profile", "load", "down"], env_file)
-        return 0
+        print(f"{session['status']} {session_id}")
+        return 1 if failed else 0
     except Exception as exc:
         session["status"] = "failed"
         session["when"]["finished_at"] = utcnow()
         session.setdefault("results", {})["error"] = str(exc)
-        if not session.get("conclusions"):
-            session["conclusions"] = f"Прогон не завершился: {exc}\n"
+        session["conclusions"] = draft_conclusions(session)
         save_session(session)
+        wipe_stack()
         print(f"failed {session_id}: {exc}", file=sys.stderr)
         return 1
 
 
 def _latest_planned() -> str:
-    planned = []
-    for session_id in list_session_ids():
-        session = load_session(session_id)
-        if session.get("status") == "planned":
-            planned.append(session_id)
+    planned = [
+        session_id
+        for session_id in list_session_ids()
+        if load_session(session_id).get("status") == "planned"
+    ]
     if not planned:
         raise SessionError("no planned session; create one with `new --why ...`")
     return planned[-1]
@@ -225,24 +267,20 @@ def cmd_list(_: argparse.Namespace) -> int:
     for session_id in ids:
         session = load_session(session_id)
         what = session.get("what") or {}
+        pairs = ",".join(pair_slug(normalize_pair(p)) for p in (what.get("pairs") or []))
         print(
             f"{session_id}  {session.get('status'):<10}  "
-            f"{what.get('duration')}  {((what.get('load') or {}).get('profile'))}  "
-            f"{session.get('why')}"
+            f"{what.get('duration')}  {(what.get('load') or {}).get('profile')}  "
+            f"[{pairs}]  {session.get('why')}"
         )
     return 0
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    session = load_session(args.id)
-    print(yaml_dump(session))
-    return 0
-
-
-def yaml_dump(data: dict) -> str:
     import yaml
 
-    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    print(yaml.safe_dump(load_session(args.id), sort_keys=False, allow_unicode=True))
+    return 0
 
 
 def cmd_conclude(args: argparse.Namespace) -> int:
@@ -254,7 +292,7 @@ def cmd_conclude(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Prism experiment sessions")
+    parser = argparse.ArgumentParser(description="Prism pair dispatcher")
     sub = parser.add_subparsers(dest="command", required=True)
 
     new = sub.add_parser("new", help="create a session from starting defaults")
@@ -262,16 +300,18 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--profile", help="load profile (default: sessions/defaults.yaml)")
     new.add_argument("--duration", help="override starting duration, e.g. 5m")
     new.add_argument("--transport", help="nats or http")
-    new.add_argument("--go-storage", help="timescaledb|clickhouse|influxdb|victoriametrics")
-    new.add_argument("--python-storage", help="timescaledb|clickhouse|influxdb|victoriametrics")
-    new.add_argument("--run", action="store_true", help="start the Docker run immediately")
-    new.add_argument("--down", action="store_true", help="compose down after a successful run")
+    new.add_argument(
+        "--pairs",
+        help="comma-separated backend:storage, e.g. go:timescaledb,python:influxdb",
+    )
+    new.add_argument("--run", action="store_true", help="dispatch immediately")
+    new.add_argument("--fail-fast", action="store_true")
     new.set_defaults(func=cmd_new)
 
-    run = sub.add_parser("run", help="execute a planned session via Docker")
+    run = sub.add_parser("run", help="dispatch pairs: clean start, run, record, wipe")
     run.add_argument("id", nargs="?", help="session id; defaults to the latest planned")
-    run.add_argument("--no-up", action="store_true", help="do not recreate the stack")
-    run.add_argument("--down", action="store_true")
+    run.add_argument("--from-pair", help="resume from this pair slug, e.g. python-influxdb")
+    run.add_argument("--fail-fast", action="store_true")
     run.set_defaults(func=cmd_run)
 
     listing = sub.add_parser("list", help="show the session catalog")

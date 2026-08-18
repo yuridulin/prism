@@ -87,25 +87,19 @@ query:
 
 Прогон — это запись в `sessions/`: когда, что, зачем, результаты, выводы. Их будет много; каталог — `sessions/catalog.yaml`.
 
-Стартовые характеристики новой сессии (не константы стенда) лежат в `sessions/defaults.yaml`:
+Стартовые характеристики новой сессии лежат в `sessions/defaults.yaml`: 5m, `iot-steady`, общий resource envelope, список пар.
 
-- длительность `5m`
-- нагрузка `iot-steady`
-- одинаковый resource envelope для Docker
-
-Любую из них сессия может переопределить. Сравнивать честно имеет смысл только при том же конверте.
+Диспетчер гоняет **пары по очереди**. На каждую: `down -v` → только её API и БД → прогон → запись → снова `down -v`. Соседние стеки не стартуют.
 
 ```powershell
 pip install -r sessions/requirements.txt
-python sessions/run.py new --why "Базовый write-path на дефолтной паре"
+python sessions/run.py new --why "Базовый write-path"
 python sessions/run.py run
-python sessions/run.py new --why "Query mix 10 минут" --profile query-mix --duration 10m --run
+python sessions/run.py new --why "Только ClickHouse" --pairs go:clickhouse,python:clickhouse --run
+python sessions/run.py run --from-pair python-influxdb
 python sessions/run.py list
-python sessions/run.py show <id>
-python sessions/run.py conclude <id> --text "Go/Timescale держит целевой rate, Python/Influx деградирует по p95."
+python sessions/run.py conclude <id> --text "Go/Timescale держит rate, Python/Influx хуже по p95."
 ```
-
-`run` поднимает стек через `docker-compose.yml` + `docker-compose.session.yml` (лимиты CPU/RAM из сессии), ждёт `/readyz`, гоняет генератор указанное время, снимает Prometheus и пишет черновик выводов. Выводы потом заменяются руками.
 
 ## Контракт API
 
@@ -153,7 +147,7 @@ PYTHON_API_STORAGE=victoriametrics
 
 Значения: `timescaledb`, `clickhouse`, `influxdb`, `victoriametrics`.
 
-По умолчанию Go → TimescaleDB, Python → InfluxDB. Оба слушают одну NATS-тему разными queue groups.
+В сессии пары идут по одной. Полный `docker compose up` по-прежнему поднимает весь стенд для ручной отладки.
 
 ## Порты
 
