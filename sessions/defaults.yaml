@@ -9,8 +9,10 @@ load:
   transport: ""
 
 pairs:
-  - { backend: go, storage: timescaledb }
-  - { backend: python, storage: influxdb }
+  - { backend: go, storage: questdb }
+  - { backend: go, storage: clickhouse }
+  - { backend: csharp, storage: questdb }
+  - { backend: rust, storage: questdb }
 
 resources:
   api:

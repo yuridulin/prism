@@ -27,9 +27,15 @@ services:
     <<: *api
   python-api:
     <<: *api
+  csharp-api:
+    <<: *api
+  rust-api:
+    <<: *api
   timescaledb:
     <<: *storage
   clickhouse:
+    <<: *storage
+  questdb:
     <<: *storage
   influxdb:
     <<: *storage

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import product
 from pathlib import Path
 import os
 
@@ -15,18 +14,11 @@ class ProfileError(ValueError):
 
 
 @dataclass(frozen=True)
-class LabelDim:
-    name: str
-    values: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class QueryMixItem:
     op: str
     weight: float
     window: str = "15m"
     step: str = "1m"
-    agg: str = "avg"
 
 
 @dataclass(frozen=True)
@@ -35,8 +27,9 @@ class IngestSpec:
     rate: float = 1000
     batch: int = 100
     workers: int = 1
-    metrics: tuple[str, ...] = ("cpu.usage",)
-    labels: tuple[LabelDim, ...] = ()
+    tag_start: int = 1
+    tag_count: int = 100
+    good_ratio: float = 0.98
     out_of_order: float = 0.0
     late_ms: int = 0
 
@@ -57,14 +50,8 @@ class Profile:
     ingest: IngestSpec
     query: QuerySpec
 
-    def label_dims(self) -> tuple[LabelDim, ...]:
-        return self.ingest.labels
-
     def sample_space_size(self) -> int:
-        size = max(len(self.ingest.metrics), 1)
-        for dim in self.ingest.labels:
-            size *= max(len(dim.values), 1)
-        return size
+        return max(self.ingest.tag_count, 1)
 
 
 def profiles_dir(explicit: str | None = None) -> Path:
@@ -125,16 +112,14 @@ def _parse(raw: dict) -> Profile:
 
 
 def _parse_ingest(raw: dict) -> IngestSpec:
-    metrics = tuple(str(m) for m in (raw.get("metrics") or ["cpu.usage"]))
-    if not metrics:
-        raise ProfileError("ingest.metrics must not be empty")
     return IngestSpec(
         enabled=bool(raw.get("enabled", True)),
         rate=float(raw.get("rate") or 0),
         batch=max(int(raw.get("batch") or 1), 1),
         workers=max(int(raw.get("workers") or 1), 1),
-        metrics=metrics,
-        labels=_parse_labels(raw.get("labels") or {}),
+        tag_start=max(int(raw.get("tag_start") or 1), 0),
+        tag_count=max(int(raw.get("tag_count") or 1), 1),
+        good_ratio=min(max(float(raw.get("good_ratio") or 0.98), 0.0), 1.0),
         out_of_order=min(max(float(raw.get("out_of_order") or 0), 0.0), 1.0),
         late_ms=max(int(raw.get("late_ms") or 0), 0),
     )
@@ -142,57 +127,23 @@ def _parse_ingest(raw: dict) -> IngestSpec:
 
 def _parse_query(raw: dict) -> QuerySpec:
     mix = []
+    aliases = {"query": "range", "latest": "locf"}
     for item in raw.get("mix") or []:
-        op = str(item.get("op") or "").lower()
-        if op not in {"query", "latest"}:
-            raise ProfileError("query.mix.op must be query or latest")
+        op = aliases.get(str(item.get("op") or "").lower(), str(item.get("op") or "").lower())
+        if op not in {"locf", "range", "sample", "twavg"}:
+            raise ProfileError("query.mix.op must be locf, range, sample or twavg")
         mix.append(
             QueryMixItem(
                 op=op,
                 weight=max(float(item.get("weight") or 1), 0.0),
                 window=str(item.get("window") or "15m"),
                 step=str(item.get("step") or "1m"),
-                agg=str(item.get("agg") or "avg"),
             )
         )
     enabled = bool(raw.get("enabled", False))
     if enabled and not mix:
         raise ProfileError("query.mix is required when query.enabled is true")
     return QuerySpec(enabled=enabled, rate=float(raw.get("rate") or 0), mix=tuple(mix))
-
-
-def _parse_labels(raw: dict) -> tuple[LabelDim, ...]:
-    dims: list[LabelDim] = []
-    for name, spec in raw.items():
-        if not isinstance(spec, dict):
-            raise ProfileError(f"labels.{name} must be a mapping")
-        if spec.get("values"):
-            values = tuple(str(v) for v in spec["values"])
-        else:
-            count = int(spec.get("count") or 0)
-            if count <= 0:
-                raise ProfileError(f"labels.{name} needs values or count")
-            prefix = str(spec.get("prefix") or f"{name}-")
-            width = int(spec.get("width") or len(str(max(count - 1, 0))))
-            values = tuple(f"{prefix}{i:0{width}d}" for i in range(count))
-        dims.append(LabelDim(name=str(name), values=values))
-    return tuple(dims)
-
-
-def random_labels(dims: tuple[LabelDim, ...], rng) -> dict[str, str]:
-    return {dim.name: rng.choice(dim.values) for dim in dims}
-
-
-def enumerate_labels(dims: tuple[LabelDim, ...], limit: int = 10_000) -> list[dict[str, str]]:
-    if not dims:
-        return [{}]
-    keys = [d.name for d in dims]
-    out: list[dict[str, str]] = []
-    for combo in product(*(d.values for d in dims)):
-        out.append(dict(zip(keys, combo, strict=True)))
-        if len(out) >= limit:
-            break
-    return out
 
 
 def pick_mix(mix: tuple[QueryMixItem, ...], rng) -> QueryMixItem:
@@ -209,7 +160,6 @@ def pick_mix(mix: tuple[QueryMixItem, ...], rng) -> QueryMixItem:
 
 
 def to_k6_env(profile: Profile) -> dict:
-    """Minimal JSON-serializable view for k6."""
     return {
         "name": profile.name,
         "transport": profile.transport,
@@ -218,20 +168,15 @@ def to_k6_env(profile: Profile) -> dict:
             "enabled": profile.ingest.enabled,
             "rate": profile.ingest.rate,
             "batch": profile.ingest.batch,
-            "metrics": list(profile.ingest.metrics),
-            "labels": {d.name: list(d.values[:50]) for d in profile.ingest.labels},
+            "tag_start": profile.ingest.tag_start,
+            "tag_count": profile.ingest.tag_count,
+            "good_ratio": profile.ingest.good_ratio,
         },
         "query": {
             "enabled": profile.query.enabled,
             "rate": profile.query.rate,
             "mix": [
-                {
-                    "op": i.op,
-                    "weight": i.weight,
-                    "window": i.window,
-                    "step": i.step,
-                    "agg": i.agg,
-                }
+                {"op": i.op, "weight": i.weight, "window": i.window, "step": i.step}
                 for i in profile.query.mix
             ],
         },

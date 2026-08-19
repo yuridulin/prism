@@ -1,27 +1,19 @@
 name: burst
-description: Short high-rate ingest spike. Good for write-path saturation.
+description: Short write spike with some out-of-order samples.
 
 transport: nats
-duration: 60
+duration: 0
 
 ingest:
   enabled: true
-  rate: 20000
-  batch: 500
-  workers: 4
-  metrics:
-    - cpu.usage
-    - mem.used
-    - disk.io
-  labels:
-    host:
-      prefix: dev-
-      count: 100
-      width: 3
-    site:
-      values: [lab]
+  rate: 8000
+  batch: 400
+  workers: 2
+  tag_start: 1
+  tag_count: 500
+  good_ratio: 0.95
   out_of_order: 0.05
-  late_ms: 2000
+  late_ms: 2500
 
 query:
   enabled: false

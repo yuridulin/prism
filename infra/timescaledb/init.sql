@@ -1,21 +1,26 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
-CREATE TABLE IF NOT EXISTS points (
-    ts      TIMESTAMPTZ       NOT NULL,
-    metric  TEXT              NOT NULL,
-    value   DOUBLE PRECISION  NOT NULL,
-    labels  JSONB             NOT NULL DEFAULT '{}'::jsonb
+CREATE TABLE IF NOT EXISTS tags (
+    id    INTEGER PRIMARY KEY,
+    name  TEXT NOT NULL,
+    unit  TEXT NOT NULL DEFAULT ''
 );
 
-SELECT create_hypertable('points', 'ts', if_not_exists => TRUE);
+CREATE TABLE IF NOT EXISTS samples (
+    ts      TIMESTAMPTZ NOT NULL,
+    tag_id  INTEGER     NOT NULL,
+    value   REAL        NOT NULL,
+    quality SMALLINT    NOT NULL
+);
 
-CREATE INDEX IF NOT EXISTS points_metric_ts_idx ON points (metric, ts DESC);
-CREATE INDEX IF NOT EXISTS points_labels_gin_idx ON points USING GIN (labels);
+SELECT create_hypertable('samples', 'ts', if_not_exists => TRUE);
 
-ALTER TABLE points SET (
+CREATE INDEX IF NOT EXISTS samples_tag_ts_idx ON samples (tag_id, ts DESC);
+
+ALTER TABLE samples SET (
     timescaledb.compress,
-    timescaledb.compress_segmentby = 'metric'
+    timescaledb.compress_segmentby = 'tag_id'
 );
 
-SELECT add_compression_policy('points', INTERVAL '1 day', if_not_exists => TRUE);
-SELECT add_retention_policy('points', INTERVAL '7 days', if_not_exists => TRUE);
+SELECT add_compression_policy('samples', INTERVAL '1 day', if_not_exists => TRUE);
+SELECT add_retention_policy('samples', INTERVAL '7 days', if_not_exists => TRUE);

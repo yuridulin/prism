@@ -2,9 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,22 +38,18 @@ func (s *Timescale) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
-func (s *Timescale) Write(ctx context.Context, points []model.Point) error {
-	if len(points) == 0 {
+func (s *Timescale) Write(ctx context.Context, samples []model.Sample) error {
+	if len(samples) == 0 {
 		return nil
 	}
 	batch := &pgx.Batch{}
-	const q = `INSERT INTO points (ts, metric, value, labels) VALUES ($1, $2, $3, $4)`
-	for _, p := range points {
-		raw, err := json.Marshal(model.NormalizeLabels(p.Labels))
-		if err != nil {
-			return err
-		}
-		batch.Queue(q, p.TS.UTC(), p.Metric, p.Value, raw)
+	const q = `INSERT INTO samples (ts, tag_id, value, quality) VALUES ($1, $2, $3, $4)`
+	for _, p := range samples {
+		batch.Queue(q, p.TS.UTC(), int32(p.TagID), float32(p.Value), int16(p.Quality))
 	}
 	br := s.pool.SendBatch(ctx, batch)
 	defer br.Close()
-	for range points {
+	for range samples {
 		if _, err := br.Exec(); err != nil {
 			return err
 		}
@@ -64,64 +57,115 @@ func (s *Timescale) Write(ctx context.Context, points []model.Point) error {
 	return nil
 }
 
-func (s *Timescale) Query(ctx context.Context, q model.Query) (*model.QueryResult, error) {
-	labels, err := json.Marshal(model.NormalizeLabels(q.Labels))
-	if err != nil {
-		return nil, err
-	}
-	sql := fmt.Sprintf(`
-		SELECT time_bucket($1::interval, ts) AS bucket, %s(value) AS value
-		FROM points
-		WHERE metric = $2 AND ts >= $3 AND ts < $4 AND labels @> $5::jsonb
-		GROUP BY bucket
-		ORDER BY bucket`, aggSQL(q.Agg))
-
-	rows, err := s.pool.Query(ctx, sql, interval(q.Step), q.Metric, q.From.UTC(), q.To.UTC(), labels)
+func (s *Timescale) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality
+		FROM samples
+		WHERE tag_id = ANY($1) AND ts <= $2
+		ORDER BY tag_id, ts DESC`, intTags(tagIDs), at.UTC())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanSamples(rows, false)
+}
 
-	out := &model.QueryResult{Metric: q.Metric, Agg: q.Agg, Step: q.Step.String(), Points: []model.Sample{}}
+func (s *Timescale) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
+	ids := intTags(tagIDs)
+	rows, err := s.pool.Query(ctx, `
+		SELECT ts, tag_id, value, quality, carried FROM (
+			SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality, true AS carried
+			FROM samples
+			WHERE tag_id = ANY($1) AND ts <= $2
+			ORDER BY tag_id, ts DESC
+			UNION ALL
+			SELECT ts, tag_id, value, quality, false
+			FROM samples
+			WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
+		) s
+		ORDER BY tag_id, ts`, ids, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSamplesCarried(rows)
+}
+
+func (s *Timescale) UpsertTags(ctx context.Context, tags []model.Tag) error {
+	batch := &pgx.Batch{}
+	for _, t := range tags {
+		batch.Queue(`
+			INSERT INTO tags (id, name, unit) VALUES ($1, $2, $3)
+			ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, unit = EXCLUDED.unit`,
+			int32(t.ID), t.Name, t.Unit)
+	}
+	br := s.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range tags {
+		if _, err := br.Exec(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Timescale) ListTags(ctx context.Context) ([]model.Tag, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, name, COALESCE(unit, '') FROM tags ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Tag
 	for rows.Next() {
-		var sample model.Sample
-		if err := rows.Scan(&sample.TS, &sample.Value); err != nil {
+		var t model.Tag
+		var id int32
+		if err := rows.Scan(&id, &t.Name, &t.Unit); err != nil {
 			return nil, err
 		}
-		out.Points = append(out.Points, sample)
+		t.ID = uint32(id)
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }
 
-func (s *Timescale) Latest(ctx context.Context, metric string, labels map[string]string) (*model.Point, error) {
-	raw, err := json.Marshal(model.NormalizeLabels(labels))
-	if err != nil {
-		return nil, err
+func intTags(ids []uint32) []int32 {
+	out := make([]int32, len(ids))
+	for i, id := range ids {
+		out[i] = int32(id)
 	}
-	row := s.pool.QueryRow(ctx, `
-		SELECT ts, metric, value, labels
-		FROM points
-		WHERE metric = $1 AND labels @> $2::jsonb
-		ORDER BY ts DESC
-		LIMIT 1`, metric, raw)
+	return out
+}
 
-	var p model.Point
-	var blob []byte
-	if err := row.Scan(&p.TS, &p.Metric, &p.Value, &blob); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
+func scanSamples(rows pgx.Rows, carried bool) ([]model.Sample, error) {
+	var out []model.Sample
+	for rows.Next() {
+		var s model.Sample
+		var tag int32
+		var q int16
+		if err := rows.Scan(&s.TS, &tag, &s.Value, &q); err != nil {
+			return nil, err
 		}
-		return nil, err
+		s.TagID = uint32(tag)
+		s.Quality = uint16(q)
+		s.Carried = carried
+		out = append(out, s)
 	}
-	if err := json.Unmarshal(blob, &p.Labels); err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return out, rows.Err()
 }
 
-func interval(d time.Duration) string {
-	if d < time.Second {
-		d = time.Second
+func scanSamplesCarried(rows pgx.Rows) ([]model.Sample, error) {
+	var out []model.Sample
+	for rows.Next() {
+		var s model.Sample
+		var tag int32
+		var q int16
+		if err := rows.Scan(&s.TS, &tag, &s.Value, &q, &s.Carried); err != nil {
+			return nil, err
+		}
+		s.TagID = uint32(tag)
+		s.Quality = uint16(q)
+		out = append(out, s)
 	}
-	return fmt.Sprintf("%d seconds", int(d.Seconds()))
+	return out, rows.Err()
 }
+

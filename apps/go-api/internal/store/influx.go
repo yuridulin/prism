@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"sync"
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -17,6 +19,7 @@ type Influx struct {
 	client influxdb2.Client
 	org    string
 	bucket string
+	tags   catalogMem
 }
 
 func NewInflux(cfg config.Config) (*Influx, error) {
@@ -42,109 +45,134 @@ func (s *Influx) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (s *Influx) Write(ctx context.Context, points []model.Point) error {
-	if len(points) == 0 {
+func (s *Influx) Write(ctx context.Context, samples []model.Sample) error {
+	if len(samples) == 0 {
 		return nil
 	}
 	api := s.client.WriteAPIBlocking(s.org, s.bucket)
-	batch := make([]*write.Point, 0, len(points))
-	for _, p := range points {
-		tags := model.NormalizeLabels(p.Labels)
-		tags["metric"] = p.Metric
-		batch = append(batch, influxdb2.NewPoint("prism", tags, map[string]any{"value": p.Value}, p.TS.UTC()))
+	batch := make([]*write.Point, 0, len(samples))
+	for _, p := range samples {
+		batch = append(batch, influxdb2.NewPoint(
+			"samples",
+			map[string]string{"tag_id": strconv.FormatUint(uint64(p.TagID), 10)},
+			map[string]any{"value": p.Value, "quality": int64(p.Quality)},
+			p.TS.UTC(),
+		))
 	}
 	return api.WritePoint(ctx, batch...)
 }
 
-func (s *Influx) Query(ctx context.Context, q model.Query) (*model.QueryResult, error) {
+func (s *Influx) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
+	return s.queryLast(ctx, tagIDs, time.Time{}, at.UTC(), false)
+}
+
+func (s *Influx) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
+	seed, err := s.queryLast(ctx, tagIDs, time.Time{}, from.UTC(), true)
+	if err != nil {
+		return nil, err
+	}
+	mid, err := s.queryWindow(ctx, tagIDs, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, err
+	}
+	return append(seed, mid...), nil
+}
+
+func (s *Influx) queryLast(ctx context.Context, tagIDs []uint32, start, stop time.Time, carried bool) ([]model.Sample, error) {
+	startRaw := "-30d"
+	if !start.IsZero() {
+		startRaw = start.Format(time.RFC3339Nano)
+	}
 	flux := fmt.Sprintf(`
 from(bucket: %q)
   |> range(start: %s, stop: %s)
-  |> filter(fn: (r) => r._measurement == "prism" and r.metric == %q and r._field == "value")
-  %s
-  |> aggregateWindow(every: %s, fn: %s, createEmpty: false)
-  |> keep(columns: ["_time", "_value"])
-`, s.bucket, q.From.UTC().Format(time.RFC3339Nano), q.To.UTC().Format(time.RFC3339Nano),
-		q.Metric, fluxLabelFilters(q.Labels), fluxDuration(q.Step), fluxAgg(q.Agg))
+  |> filter(fn: (r) => r._measurement == "samples")
+  |> filter(fn: (r) => %s)
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> group(columns: ["tag_id"])
+  |> last()
+`, s.bucket, startRaw, stop.Format(time.RFC3339Nano), influxTagFilter(tagIDs))
+	return s.collect(ctx, flux, carried)
+}
 
+func (s *Influx) queryWindow(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
+	flux := fmt.Sprintf(`
+from(bucket: %q)
+  |> range(start: %s, stop: %s)
+  |> filter(fn: (r) => r._measurement == "samples")
+  |> filter(fn: (r) => %s)
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+`, s.bucket, from.Add(time.Nanosecond).Format(time.RFC3339Nano), to.Add(time.Nanosecond).Format(time.RFC3339Nano), influxTagFilter(tagIDs))
+	return s.collect(ctx, flux, false)
+}
+
+func (s *Influx) collect(ctx context.Context, flux string, carried bool) ([]model.Sample, error) {
 	result, err := s.client.QueryAPI(s.org).Query(ctx, flux)
 	if err != nil {
 		return nil, err
 	}
-	out := &model.QueryResult{Metric: q.Metric, Agg: q.Agg, Step: q.Step.String(), Points: []model.Sample{}}
+	var out []model.Sample
 	for result.Next() {
 		rec := result.Record()
-		val, ok := rec.Value().(float64)
-		if !ok {
-			if n, ok := rec.Value().(int64); ok {
-				val = float64(n)
-			}
+		id, _ := strconv.ParseUint(fmt.Sprint(rec.ValueByKey("tag_id")), 10, 32)
+		val, _ := rec.ValueByKey("value").(float64)
+		q := uint16(0)
+		switch raw := rec.ValueByKey("quality").(type) {
+		case int64:
+			q = uint16(raw)
+		case float64:
+			q = uint16(raw)
 		}
-		out.Points = append(out.Points, model.Sample{TS: rec.Time(), Value: val})
+		out = append(out, model.Sample{TS: rec.Time(), TagID: uint32(id), Value: val, Quality: q, Carried: carried})
 	}
 	return out, result.Err()
 }
 
-func (s *Influx) Latest(ctx context.Context, metric string, labels map[string]string) (*model.Point, error) {
-	flux := fmt.Sprintf(`
-from(bucket: %q)
-  |> range(start: -7d)
-  |> filter(fn: (r) => r._measurement == "prism" and r.metric == %q and r._field == "value")
-  %s
-  |> last()
-`, s.bucket, metric, fluxLabelFilters(labels))
+func (s *Influx) UpsertTags(_ context.Context, tags []model.Tag) error {
+	s.tags.upsert(tags)
+	return nil
+}
 
-	result, err := s.client.QueryAPI(s.org).Query(ctx, flux)
-	if err != nil {
-		return nil, err
+func (s *Influx) ListTags(_ context.Context) ([]model.Tag, error) {
+	return s.tags.list(), nil
+}
+
+func influxTagFilter(ids []uint32) string {
+	if len(ids) == 0 {
+		return "true"
 	}
-	if result.Next() {
-		rec := result.Record()
-		val, _ := rec.Value().(float64)
-		outLabels := map[string]string{}
-		for k, v := range rec.Values() {
-			if sv, ok := v.(string); ok && k != "_measurement" && k != "_field" && k != "metric" && k != "result" && k != "table" {
-				outLabels[k] = sv
-			}
+	expr := ""
+	for i, id := range ids {
+		if i > 0 {
+			expr += " or "
 		}
-		return &model.Point{TS: rec.Time(), Metric: metric, Value: val, Labels: outLabels}, result.Err()
+		expr += fmt.Sprintf(`r.tag_id == %q`, strconv.FormatUint(uint64(id), 10))
 	}
-	if err := result.Err(); err != nil {
-		return nil, err
-	}
-	return nil, ErrNotFound
+	return expr
 }
 
-func fluxAgg(agg string) string {
-	switch agg {
-	case "min":
-		return "min"
-	case "max":
-		return "max"
-	case "sum":
-		return "sum"
-	case "count":
-		return "count"
-	default:
-		return "mean"
+type catalogMem struct {
+	mu   sync.Mutex
+	data map[uint32]model.Tag
+}
+
+func (c *catalogMem) upsert(tags []model.Tag) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.data == nil {
+		c.data = map[uint32]model.Tag{}
+	}
+	for _, t := range tags {
+		c.data[t.ID] = t
 	}
 }
 
-func fluxDuration(d time.Duration) string {
-	sec := int(d.Seconds())
-	if sec < 1 {
-		sec = 1
+func (c *catalogMem) list() []model.Tag {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]model.Tag, 0, len(c.data))
+	for _, t := range c.data {
+		out = append(out, t)
 	}
-	return fmt.Sprintf("%ds", sec)
-}
-
-func fluxLabelFilters(labels map[string]string) string {
-	if len(labels) == 0 {
-		return ""
-	}
-	var b string
-	for k, v := range labels {
-		b += fmt.Sprintf(`  |> filter(fn: (r) => r[%q] == %q)`+"\n", k, v)
-	}
-	return b
+	return out
 }

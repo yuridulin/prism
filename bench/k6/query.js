@@ -12,14 +12,12 @@ export default function () {
   const to = new Date();
   const from = new Date(to.getTime() - 15 * 60 * 1000);
   const res = http.post(
-    `${BASE}/v1/query`,
+    `${BASE}/v1/read`,
     JSON.stringify({
-      metric: "cpu.usage",
+      mode: "range",
+      tag_ids: [1],
       from: from.toISOString(),
       to: to.toISOString(),
-      step: "1m",
-      agg: "avg",
-      labels: { site: "lab" },
     }),
     { headers: { "Content-Type": "application/json" } },
   );

@@ -1,5 +1,5 @@
 name: query-mix
-description: Mixed read/write. Range queries plus latest lookups on a warm ingest stream.
+description: Ingest plus the two main read modes, with light sample/twavg.
 
 transport: http
 duration: 0
@@ -9,17 +9,9 @@ ingest:
   rate: 500
   batch: 50
   workers: 1
-  metrics:
-    - cpu.usage
-    - mem.used
-    - disk.io
-  labels:
-    host:
-      prefix: dev-
-      count: 50
-      width: 3
-    site:
-      values: [lab]
+  tag_start: 1
+  tag_count: 250
+  good_ratio: 0.98
   out_of_order: 0.0
   late_ms: 0
 
@@ -27,10 +19,7 @@ query:
   enabled: true
   rate: 40
   mix:
-    - op: query
-      weight: 70
-      window: 15m
-      step: 1m
-      agg: avg
-    - op: latest
-      weight: 30
+    - { op: locf, weight: 50 }
+    - { op: range, weight: 40, window: 15m }
+    - { op: sample, weight: 7, window: 15m, step: 1m }
+    - { op: twavg, weight: 3, window: 15m }

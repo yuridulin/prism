@@ -1,17 +1,30 @@
 openapi: 3.1.0
 info:
   title: Prism Time-Series API
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    Единый контракт для всех бэкендов стенда.
-    Канонические операции — POST. GET оставлен для отладки.
+    Единый контракт для всех бэкендов стенда (Go, Python, C#, Rust).
+
+    Модель — каталог тегов + append-only ряды:
+      ts (UTC), tag_id (uint32), value (float32), quality (OPC DA uint16).
+
+    Чтение:
+      1. locf   — last observation carried forward на момент `at` (основной)
+      2. range  — locf на `from` + все точки (from, to] (основной)
+      3. sample — range, затем сэмплирование с протяжкой LOCF
+      4. twavg  — range, затем средневзвешенное по времени
+
+    Канонические операции — POST. Ошибки: `{ "error": { "code", "message" } }`.
     Хранилище выбирается `PRISM_STORAGE`.
-    Ошибки всегда в конверте `{ "error": { "code", "message" } }`.
 servers:
   - url: http://localhost:8081
     description: Go API
   - url: http://localhost:8082
     description: Python API
+  - url: http://localhost:8083
+    description: C# API
+  - url: http://localhost:8084
+    description: Rust API
 paths:
   /healthz:
     get:
@@ -43,9 +56,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Meta"
-  /v1/points:
+  /v1/tags:
+    get:
+      summary: Каталог тегов
+      responses:
+        "200":
+          description: Tags
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagList"
     post:
-      summary: Записать пачку точек
+      summary: Upsert тегов в каталог
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TagWriteRequest"
+      responses:
+        "200":
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagWriteResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/write:
+    post:
+      summary: Дописать пачку сэмплов
       requestBody:
         required: true
         content:
@@ -63,108 +103,63 @@ paths:
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
-  /v1/query:
+  /v1/read:
     post:
-      summary: Range-query с даунсемплом (канонический метод)
+      summary: Чтение в одном из четырёх режимов
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QueryRequest"
+              $ref: "#/components/schemas/ReadRequest"
       responses:
         "200":
           description: Series
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueryResult"
+                $ref: "#/components/schemas/ReadResult"
         "400":
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
-    get:
-      summary: Range-query через query string
-      parameters:
-        - $ref: "#/components/parameters/Metric"
-        - $ref: "#/components/parameters/From"
-        - $ref: "#/components/parameters/To"
-        - $ref: "#/components/parameters/Step"
-        - $ref: "#/components/parameters/Agg"
-        - $ref: "#/components/parameters/Labels"
+  /v1/locf:
+    post:
+      summary: Exact LOCF (mode=locf)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocfRequest"
       responses:
         "200":
           description: Series
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QueryResult"
+                $ref: "#/components/schemas/ReadResult"
         "400":
           $ref: "#/components/responses/Error"
-  /v1/latest:
+  /v1/range:
     post:
-      summary: Последняя точка (канонический метод)
+      summary: LOCF + start..end (mode=range)
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/LatestRequest"
+              $ref: "#/components/schemas/RangeRequest"
       responses:
         "200":
-          description: Point
+          description: Series
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Point"
-        "404":
-          $ref: "#/components/responses/Error"
+                $ref: "#/components/schemas/ReadResult"
         "400":
           $ref: "#/components/responses/Error"
-    get:
-      summary: Последняя точка через query string
-      parameters:
-        - $ref: "#/components/parameters/Metric"
-        - $ref: "#/components/parameters/Labels"
-      responses:
-        "200":
-          description: Point
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Point"
-        "404":
-          $ref: "#/components/responses/Error"
 components:
-  parameters:
-    Metric:
-      in: query
-      name: metric
-      required: true
-      schema: { type: string }
-    From:
-      in: query
-      name: from
-      required: true
-      schema: { type: string, format: date-time }
-    To:
-      in: query
-      name: to
-      required: true
-      schema: { type: string, format: date-time }
-    Step:
-      in: query
-      name: step
-      schema: { type: string, default: 1m, examples: ["15s", "1m", "5m"] }
-    Agg:
-      in: query
-      name: agg
-      schema: { type: string, enum: [avg, min, max, sum, count], default: avg }
-    Labels:
-      in: query
-      name: labels
-      description: JSON-объект фильтров, например {"host":"dev-1"}
-      schema: { type: string }
   responses:
     Error:
       description: Error envelope
@@ -173,73 +168,150 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
-    Point:
+    Sample:
       type: object
-      required: [ts, metric, value]
+      required: [tag_id, value]
       properties:
         ts:
           type: string
           format: date-time
-        metric:
-          type: string
-          examples: ["cpu.usage"]
+          description: UTC. Если пусто на записи — now().
+        tag_id:
+          type: integer
+          minimum: 0
+          maximum: 4294967295
         value:
           type: number
-        labels:
-          type: object
-          additionalProperties:
-            type: string
-          default: {}
+          format: float
+        quality:
+          type: integer
+          minimum: 0
+          maximum: 65535
+          default: 192
+          description: |
+            OPC DA quality word.
+            192 (0xC0) Good, 64 (0x40) Uncertain, 0 Bad.
+        carried:
+          type: boolean
+          description: true, если значение протянуто LOCF, а не записано в этой точке
     WriteRequest:
       type: object
-      required: [points]
+      required: [samples]
       properties:
-        points:
+        samples:
           type: array
           items:
-            $ref: "#/components/schemas/Point"
+            $ref: "#/components/schemas/Sample"
     WriteResponse:
       type: object
       required: [written]
       properties:
         written: { type: integer }
-    QueryRequest:
+    ReadMode:
+      type: string
+      enum: [locf, range, sample, twavg]
+    ReadRequest:
       type: object
-      required: [metric, from, to]
+      required: [mode, tag_ids]
       properties:
-        metric: { type: string }
-        from: { type: string, format: date-time }
-        to: { type: string, format: date-time }
-        step: { type: string, default: 1m }
-        agg: { type: string, enum: [avg, min, max, sum, count], default: avg }
-        labels:
-          type: object
-          additionalProperties: { type: string }
-          default: {}
-    LatestRequest:
+        mode:
+          $ref: "#/components/schemas/ReadMode"
+        tag_ids:
+          type: array
+          items: { type: integer, minimum: 0, maximum: 4294967295 }
+          minItems: 1
+        at:
+          type: string
+          format: date-time
+          description: Обязателен для locf
+        from:
+          type: string
+          format: date-time
+          description: Обязателен для range / sample / twavg
+        to:
+          type: string
+          format: date-time
+        step:
+          type: string
+          default: 1m
+          description: Шаг сэмплирования, обязателен для sample
+    LocfRequest:
       type: object
-      required: [metric]
+      required: [tag_ids, at]
       properties:
-        metric: { type: string }
-        labels:
-          type: object
-          additionalProperties: { type: string }
-          default: {}
-    QueryResult:
+        tag_ids:
+          type: array
+          items: { type: integer }
+        at:
+          type: string
+          format: date-time
+    RangeRequest:
       type: object
-      required: [metric, agg, step, points]
+      required: [tag_ids, from, to]
       properties:
-        metric: { type: string }
-        agg: { type: string }
-        step: { type: string }
-        points:
+        tag_ids:
+          type: array
+          items: { type: integer }
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+    Series:
+      type: object
+      required: [tag_id, samples]
+      properties:
+        tag_id: { type: integer }
+        value:
+          type: number
+          description: Результат twavg
+        samples:
           type: array
           items:
-            type: object
-            required: [ts, value]
-            properties:
-              ts: { type: string, format: date-time }
-              value: { type: number }
+            $ref: "#/components/schemas/Sample"
+    ReadResult:
+      type: object
+      required: [mode, series]
+      properties:
+        mode:
+          $ref: "#/components/schemas/ReadMode"
+        at: { type: string, format: date-time }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        step: { type: string }
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/Series"
+    Tag:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer, minimum: 0, maximum: 4294967295 }
+        name: { type: string }
+        unit: { type: string }
+    TagList:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+    TagWriteRequest:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+    TagWriteResponse:
+      type: object
+      required: [upserted]
+      properties:
+        upserted: { type: integer }
     Meta:
       type: object
       required: [backend, storage, storages, contract, ops]
@@ -249,10 +321,10 @@ components:
         storages:
           type: array
           items: { type: string }
-        contract: { type: string, examples: ["v1"] }
+        contract: { type: string, examples: ["v1.1"] }
         ops:
           type: array
-          items: { type: string, enum: [write, query, latest] }
+          items: { type: string, enum: [write, locf, range, sample, twavg, tags] }
     Error:
       type: object
       required: [error]

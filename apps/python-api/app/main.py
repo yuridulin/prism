@@ -1,10 +1,9 @@
 import asyncio
-import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import PlainTextResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -13,8 +12,20 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import SUPPORTED, settings
 from app.errors import http_error_handler, validation_error_handler
 from app.metrics import observe_api, observe_backend, track
-from app.models import CONTRACT, OPS, LatestRequest, Meta, Point, QueryRequest, QueryResult, WriteRequest, WriteResponse
+from app.models import (
+    CONTRACT,
+    OPS,
+    Meta,
+    ReadRequest,
+    ReadResult,
+    TagList,
+    TagWriteRequest,
+    TagWriteResponse,
+    WriteRequest,
+    WriteResponse,
+)
 from app.nats_consumer import run_consumer
+from app.read import assemble
 from app.store import create_store
 from app.store.base import Store
 
@@ -83,103 +94,77 @@ async def meta() -> Meta:
     return Meta(backend="python", storage=store.name, storages=SUPPORTED, contract=CONTRACT, ops=OPS)
 
 
-@app.post("/v1/points", response_model=WriteResponse)
-async def write_points(req: WriteRequest) -> WriteResponse:
-    if not req.points:
-        raise HTTPException(status_code=400, detail="points is required")
+@app.get("/v1/tags", response_model=TagList)
+async def list_tags() -> TagList:
+    return TagList(tags=await store.list_tags())
+
+
+@app.post("/v1/tags", response_model=TagWriteResponse)
+async def upsert_tags(req: TagWriteRequest) -> TagWriteResponse:
+    if not req.tags:
+        raise HTTPException(status_code=400, detail="tags is required")
+    await store.upsert_tags(req.tags)
+    return TagWriteResponse(upserted=len(req.tags))
+
+
+@app.post("/v1/write", response_model=WriteResponse)
+async def write_samples(req: WriteRequest) -> WriteResponse:
+    if not req.samples:
+        raise HTTPException(status_code=400, detail="samples is required")
     now = datetime.now(timezone.utc)
-    for p in req.points:
-        if p.ts.tzinfo is None:
-            p.ts = p.ts.replace(tzinfo=timezone.utc)
-        if p.ts.timestamp() == 0:
-            p.ts = now
+    for s in req.samples:
+        if s.ts.tzinfo is None:
+            s.ts = s.ts.replace(tzinfo=timezone.utc)
+        if s.ts.timestamp() == 0:
+            s.ts = now
     with track() as elapsed:
         try:
-            await store.write(req.points)
+            await store.write(req.samples)
         except Exception as exc:
             observe_backend(store.name, "write", "http", 0, elapsed(), exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    observe_backend(store.name, "write", "http", len(req.points), elapsed())
-    return WriteResponse(written=len(req.points))
+    observe_backend(store.name, "write", "http", len(req.samples), elapsed())
+    return WriteResponse(written=len(req.samples))
 
 
-@app.post("/v1/query", response_model=QueryResult)
-async def query_post(req: QueryRequest) -> QueryResult:
-    return await _query(req)
+@app.post("/v1/read", response_model=ReadResult)
+async def read_post(req: ReadRequest) -> ReadResult:
+    return await _read(req)
 
 
-@app.get("/v1/query", response_model=QueryResult)
-async def query_get(
-    metric: str,
-    from_: datetime = Query(alias="from"),
-    to: datetime = Query(),
-    step: str = "1m",
-    agg: str = "avg",
-    labels: str | None = None,
-) -> QueryResult:
-    parsed = _parse_labels(labels)
-    return await _query(QueryRequest.model_validate({
-        "metric": metric,
-        "from": from_,
-        "to": to,
-        "step": step,
-        "agg": agg,
-        "labels": parsed,
-    }))
+@app.post("/v1/locf", response_model=ReadResult)
+async def locf_post(req: ReadRequest) -> ReadResult:
+    req.mode = "locf"
+    return await _read(req)
 
 
-@app.post("/v1/latest", response_model=Point)
-async def latest_post(req: LatestRequest) -> Point:
-    return await _latest(req)
+@app.post("/v1/range", response_model=ReadResult)
+async def range_post(req: ReadRequest) -> ReadResult:
+    req.mode = "range"
+    return await _read(req)
 
 
-@app.get("/v1/latest", response_model=Point)
-async def latest_get(metric: str, labels: str | None = None) -> Point:
-    return await _latest(LatestRequest(metric=metric, labels=_parse_labels(labels)))
-
-
-async def _query(req: QueryRequest) -> QueryResult:
-    if req.agg not in {"avg", "min", "max", "sum", "count"}:
-        raise HTTPException(status_code=400, detail="invalid agg")
-    try:
-        step_td = _parse_step(req.step)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+async def _read(req: ReadRequest) -> ReadResult:
+    if not req.tag_ids:
+        raise HTTPException(status_code=400, detail="tag_ids is required")
+    step = _parse_step(req.step)
     with track() as elapsed:
         try:
-            result = await store.query(req.metric, req.from_, req.to, step_td, req.agg, req.labels or {})
+            if req.mode == "locf":
+                if req.at is None:
+                    raise HTTPException(status_code=400, detail="at is required")
+                raw = await store.locf(req.tag_ids, req.at)
+            else:
+                if req.from_ is None or req.to is None:
+                    raise HTTPException(status_code=400, detail="from and to are required")
+                raw = await store.range(req.tag_ids, req.from_, req.to)
+        except HTTPException:
+            raise
         except Exception as exc:
-            observe_backend(store.name, "query", "http", 0, elapsed(), exc)
+            observe_backend(store.name, req.mode, "http", 0, elapsed(), exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    result.step = req.step or "1m"
-    observe_backend(store.name, "query", "http", len(result.points), elapsed())
-    return result
-
-
-async def _latest(req: LatestRequest) -> Point:
-    with track() as elapsed:
-        try:
-            point = await store.latest(req.metric, req.labels or {})
-        except Exception as exc:
-            observe_backend(store.name, "latest", "http", 0, elapsed(), exc)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-    if point is None:
-        observe_backend(store.name, "latest", "http", 0, elapsed(), not_found=True)
-        raise HTTPException(status_code=404, detail="not found")
-    observe_backend(store.name, "latest", "http", 1, elapsed())
-    return point
-
-
-def _parse_labels(raw: str | None) -> dict[str, str]:
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="labels must be a JSON object") from exc
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=400, detail="labels must be a JSON object")
-    return {str(k): str(v) for k, v in parsed.items()}
+    observe_backend(store.name, req.mode, "http", len(raw), elapsed())
+    return assemble(req, raw, step)
 
 
 def _parse_step(raw: str) -> timedelta:
@@ -189,4 +174,4 @@ def _parse_step(raw: str) -> timedelta:
             return timedelta(seconds=float(raw[: -len(suffix)]) * mul)
     if raw.isdigit():
         return timedelta(seconds=int(raw))
-    raise ValueError("invalid step")
+    raise HTTPException(status_code=400, detail="invalid step")

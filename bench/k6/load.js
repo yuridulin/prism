@@ -61,17 +61,14 @@ function pick(values, fallback) {
   return values[Math.floor(Math.random() * values.length)];
 }
 
-function randomLabels() {
-  const labels = {};
-  const spec = ingest.labels || {};
-  for (const [key, values] of Object.entries(spec)) {
-    labels[key] = pick(values, "unknown");
-  }
-  return labels;
+function pickTag() {
+  const start = Number(ingest.tag_start || 1);
+  const count = Number(ingest.tag_count || 1);
+  return start + Math.floor(Math.random() * count);
 }
 
 function pickMix() {
-  const mix = query.mix || [{ op: "query", weight: 1, window: "15m", step: "1m", agg: "avg" }];
+  const mix = query.mix || [{ op: "range", weight: 1, window: "15m", step: "1m" }];
   const total = mix.reduce((sum, item) => sum + (item.weight || 1), 0);
   let cursor = Math.random() * total;
   for (const item of mix) {
@@ -97,17 +94,16 @@ function windowMs(raw) {
 export function writeBatch() {
   const now = new Date().toISOString();
   const batchSize = Math.max(Number(ingest.batch) || 1, 1);
-  const metrics = ingest.metrics || ["cpu.usage"];
-  const points = [];
+  const samples = [];
   for (let i = 0; i < batchSize; i += 1) {
-    points.push({
+    samples.push({
       ts: now,
-      metric: pick(metrics, "cpu.usage"),
+      tag_id: pickTag(),
       value: Math.random() * 100,
-      labels: randomLabels(),
+      quality: 192,
     });
   }
-  const res = http.post(`${BASE}/v1/points`, JSON.stringify({ points }), {
+  const res = http.post(`${BASE}/v1/write`, JSON.stringify({ samples }), {
     headers: { "Content-Type": "application/json" },
   });
   writeMs.add(res.timings.duration);
@@ -116,30 +112,31 @@ export function writeBatch() {
 
 export function runQuery() {
   const item = pickMix();
-  const metric = pick(ingest.metrics || ["cpu.usage"], "cpu.usage");
-  const labels = randomLabels();
-  if (item.op === "latest") {
-    const res = http.post(`${BASE}/v1/latest`, JSON.stringify({ metric, labels }), {
-      headers: { "Content-Type": "application/json" },
-    });
+  const tagIds = [pickTag()];
+  const to = new Date();
+  if (item.op === "locf" || item.op === "latest") {
+    const res = http.post(
+      `${BASE}/v1/read`,
+      JSON.stringify({ mode: "locf", tag_ids: tagIds, at: to.toISOString() }),
+      { headers: { "Content-Type": "application/json" } },
+    );
     queryMs.add(res.timings.duration);
-    check(res, { latest: (r) => r.status === 200 || r.status === 404 });
+    check(res, { locf: (r) => r.status === 200 });
     return;
   }
-  const to = new Date();
   const from = new Date(to.getTime() - windowMs(item.window));
-  const res = http.post(
-    `${BASE}/v1/query`,
-    JSON.stringify({
-      metric,
-      from: from.toISOString(),
-      to: to.toISOString(),
-      step: item.step || "1m",
-      agg: item.agg || "avg",
-      labels,
-    }),
-    { headers: { "Content-Type": "application/json" } },
-  );
+  const payload = {
+    mode: item.op === "query" ? "range" : item.op,
+    tag_ids: tagIds,
+    from: from.toISOString(),
+    to: to.toISOString(),
+  };
+  if (payload.mode === "sample") {
+    payload.step = item.step || "1m";
+  }
+  const res = http.post(`${BASE}/v1/read`, JSON.stringify(payload), {
+    headers: { "Content-Type": "application/json" },
+  });
   queryMs.add(res.timings.duration);
   check(res, { queried: (r) => r.status === 200 });
 }

@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from influxdb_client import InfluxDBClient, Point as InfluxPoint, WritePrecision
+from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-from app.models import Point, QueryResult, Sample
-from app.store.base import step_seconds
+from app.models import Sample, Tag
+from app.store.catalog import CatalogMem
 
 
 class InfluxStore:
@@ -16,72 +16,73 @@ class InfluxStore:
         self._bucket = bucket
         self._write = self._client.write_api(write_options=SYNCHRONOUS)
         self._query = self._client.query_api()
+        self._tags = CatalogMem()
 
     async def ping(self) -> None:
-        if not self._client.ping():
-            raise RuntimeError("influxdb ping failed")
+        self._client.ping()
 
-    async def write(self, points: list[Point]) -> None:
-        if not points:
+    async def write(self, samples: list[Sample]) -> None:
+        if not samples:
             return
-        batch = []
-        for p in points:
-            pt = InfluxPoint("prism").time(p.ts, WritePrecision.NS).field("value", float(p.value)).tag("metric", p.metric)
-            for k, v in (p.labels or {}).items():
-                pt = pt.tag(k, v)
-            batch.append(pt)
-        self._write.write(bucket=self._bucket, org=self._org, record=batch)
+        points = [
+            Point("samples")
+            .tag("tag_id", str(s.tag_id))
+            .field("value", float(s.value))
+            .field("quality", int(s.quality))
+            .time(s.ts)
+            for s in samples
+        ]
+        self._write.write(bucket=self._bucket, org=self._org, record=points)
 
-    async def query(
-        self,
-        metric: str,
-        start: datetime,
-        end: datetime,
-        step: timedelta,
-        agg: str,
-        labels: dict[str, str],
-    ) -> QueryResult:
-        fn = {"min": "min", "max": "max", "sum": "sum", "count": "count"}.get(agg, "mean")
-        filters = ""
-        for k, v in (labels or {}).items():
-            filters += f'  |> filter(fn: (r) => r["{k}"] == "{v}")\n'
+    async def locf(self, tag_ids: list[int], at: datetime) -> list[Sample]:
+        return self._last(tag_ids, at, carried=False)
+
+    async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
+        seed = self._last(tag_ids, start, carried=True)
+        filt = " or ".join(f'r.tag_id == "{i}"' for i in tag_ids) or "true"
         flux = f'''
 from(bucket: "{self._bucket}")
-  |> range(start: {start.isoformat()}, stop: {end.isoformat()})
-  |> filter(fn: (r) => r._measurement == "prism" and r.metric == "{metric}" and r._field == "value")
-{filters}
-  |> aggregateWindow(every: {step_seconds(step)}s, fn: {fn}, createEmpty: false)
-  |> keep(columns: ["_time", "_value"])
+  |> range(start: {start.isoformat()}, stop: {(end + timedelta(microseconds=1)).isoformat()})
+  |> filter(fn: (r) => r._measurement == "samples")
+  |> filter(fn: (r) => {filt})
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
-        tables = self._query.query(flux, org=self._org)
-        samples: list[Sample] = []
-        for table in tables:
-            for rec in table.records:
-                samples.append(Sample(ts=rec.get_time(), value=float(rec.get_value())))
-        return QueryResult(metric=metric, agg=agg, step=f"{step_seconds(step)}s", points=samples)
+        return seed + self._collect(flux, False)
 
-    async def latest(self, metric: str, labels: dict[str, str]) -> Point | None:
-        filters = ""
-        for k, v in (labels or {}).items():
-            filters += f'  |> filter(fn: (r) => r["{k}"] == "{v}")\n'
+    def _last(self, tag_ids: list[int], stop: datetime, carried: bool) -> list[Sample]:
+        filt = " or ".join(f'r.tag_id == "{i}"' for i in tag_ids) or "true"
         flux = f'''
 from(bucket: "{self._bucket}")
-  |> range(start: -7d)
-  |> filter(fn: (r) => r._measurement == "prism" and r.metric == "{metric}" and r._field == "value")
-{filters}
+  |> range(start: -30d, stop: {stop.isoformat()})
+  |> filter(fn: (r) => r._measurement == "samples")
+  |> filter(fn: (r) => {filt})
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> group(columns: ["tag_id"])
   |> last()
 '''
+        return self._collect(flux, carried)
+
+    def _collect(self, flux: str, carried: bool) -> list[Sample]:
         tables = self._query.query(flux, org=self._org)
+        out: list[Sample] = []
         for table in tables:
             for rec in table.records:
-                out_labels = {
-                    k: str(v)
-                    for k, v in rec.values.items()
-                    if k not in {"_measurement", "_field", "_time", "_value", "_start", "_stop", "result", "table", "metric"}
-                    and isinstance(v, str)
-                }
-                return Point(ts=rec.get_time(), metric=metric, value=float(rec.get_value()), labels=out_labels)
-        return None
+                out.append(
+                    Sample(
+                        ts=rec.get_time() or datetime.now(timezone.utc),
+                        tag_id=int(rec.values.get("tag_id") or 0),
+                        value=float(rec.values.get("value") or 0),
+                        quality=int(rec.values.get("quality") or 0),
+                        carried=carried,
+                    )
+                )
+        return out
+
+    async def upsert_tags(self, tags: list[Tag]) -> None:
+        self._tags.upsert(tags)
+
+    async def list_tags(self) -> list[Tag]:
+        return self._tags.list()
 
     async def close(self) -> None:
         self._client.close()

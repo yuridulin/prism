@@ -37,6 +37,20 @@ datasources:
       password: prism
     editable: false
 
+  - name: QuestDB
+    uid: questdb
+    type: postgres
+    access: proxy
+    url: questdb:8812
+    user: admin
+    secureJsonData:
+      password: quest
+    jsonData:
+      database: qdb
+      sslmode: disable
+      postgresVersion: 1500
+    editable: false
+
   - name: InfluxDB
     uid: influxdb
     type: influxdb

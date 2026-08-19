@@ -8,8 +8,6 @@ import (
 	"prism/go-api/internal/model"
 )
 
-// Observed wraps a Store and records storage-layer metrics.
-// New adapters get telemetry automatically when constructed via New.
 type Observed struct {
 	inner Store
 }
@@ -29,23 +27,37 @@ func (s *Observed) Ping(ctx context.Context) error {
 	return err
 }
 
-func (s *Observed) Write(ctx context.Context, points []model.Point) error {
+func (s *Observed) Write(ctx context.Context, samples []model.Sample) error {
 	start := time.Now()
-	err := s.inner.Write(ctx, points)
+	err := s.inner.Write(ctx, samples)
 	metrics.ObserveStorage(s.Name(), "write", time.Since(start), err)
 	return err
 }
 
-func (s *Observed) Query(ctx context.Context, q model.Query) (*model.QueryResult, error) {
+func (s *Observed) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
 	start := time.Now()
-	res, err := s.inner.Query(ctx, q)
-	metrics.ObserveStorage(s.Name(), "query", time.Since(start), err)
+	res, err := s.inner.Locf(ctx, tagIDs, at)
+	metrics.ObserveStorage(s.Name(), "locf", time.Since(start), err)
 	return res, err
 }
 
-func (s *Observed) Latest(ctx context.Context, metric string, labels map[string]string) (*model.Point, error) {
+func (s *Observed) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
 	start := time.Now()
-	res, err := s.inner.Latest(ctx, metric, labels)
-	metrics.ObserveStorage(s.Name(), "latest", time.Since(start), err)
+	res, err := s.inner.Range(ctx, tagIDs, from, to)
+	metrics.ObserveStorage(s.Name(), "range", time.Since(start), err)
+	return res, err
+}
+
+func (s *Observed) UpsertTags(ctx context.Context, tags []model.Tag) error {
+	start := time.Now()
+	err := s.inner.UpsertTags(ctx, tags)
+	metrics.ObserveStorage(s.Name(), "tags", time.Since(start), err)
+	return err
+}
+
+func (s *Observed) ListTags(ctx context.Context) ([]model.Tag, error) {
+	start := time.Now()
+	res, err := s.inner.ListTags(ctx)
+	metrics.ObserveStorage(s.Name(), "tags", time.Since(start), err)
 	return res, err
 }

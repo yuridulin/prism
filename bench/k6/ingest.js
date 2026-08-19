@@ -18,16 +18,16 @@ export const options = {
 
 export default function () {
   const payload = JSON.stringify({
-    points: [
+    samples: [
       {
         ts: new Date().toISOString(),
-        metric: "cpu.usage",
+        tag_id: 1,
         value: Math.random() * 100,
-        labels: { host: "dev-001", site: "lab" },
+        quality: 192,
       },
     ],
   });
-  const res = http.post(`${BASE}/v1/points`, payload, {
+  const res = http.post(`${BASE}/v1/write`, payload, {
     headers: { "Content-Type": "application/json" },
   });
   check(res, { written: (r) => r.status === 200 });

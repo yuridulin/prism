@@ -1,10 +1,8 @@
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import asyncpg
 
-from app.models import Point, QueryResult, Sample
-from app.store.base import agg_sql, step_seconds
+from app.models import Sample, Tag
 
 
 class TimescaleStore:
@@ -14,78 +12,77 @@ class TimescaleStore:
         self._dsn = dsn
         self._pool: asyncpg.Pool | None = None
 
-    async def _ensure(self) -> asyncpg.Pool:
+    async def _conn(self) -> asyncpg.Pool:
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=8)
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=16)
         return self._pool
 
     async def ping(self) -> None:
-        pool = await self._ensure()
+        pool = await self._conn()
         await pool.execute("SELECT 1")
 
-    async def write(self, points: list[Point]) -> None:
-        if not points:
+    async def write(self, samples: list[Sample]) -> None:
+        if not samples:
             return
-        pool = await self._ensure()
+        pool = await self._conn()
         await pool.executemany(
-            "INSERT INTO points (ts, metric, value, labels) VALUES ($1, $2, $3, $4::jsonb)",
-            [
-                (p.ts, p.metric, p.value, json.dumps(p.labels or {}))
-                for p in points
-            ],
+            "INSERT INTO samples (ts, tag_id, value, quality) VALUES ($1, $2, $3, $4)",
+            [(s.ts, s.tag_id, s.value, s.quality) for s in samples],
         )
 
-    async def query(
-        self,
-        metric: str,
-        start: datetime,
-        end: datetime,
-        step: timedelta,
-        agg: str,
-        labels: dict[str, str],
-    ) -> QueryResult:
-        pool = await self._ensure()
-        sql = f"""
-            SELECT time_bucket($1::interval, ts) AS bucket, {agg_sql(agg)}(value) AS value
-            FROM points
-            WHERE metric = $2 AND ts >= $3 AND ts < $4 AND labels @> $5::jsonb
-            GROUP BY bucket
-            ORDER BY bucket
-        """
+    async def locf(self, tag_ids: list[int], at: datetime) -> list[Sample]:
+        pool = await self._conn()
         rows = await pool.fetch(
-            sql,
-            f"{step_seconds(step)} seconds",
-            metric,
+            """
+            SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality
+            FROM samples
+            WHERE tag_id = ANY($1) AND ts <= $2
+            ORDER BY tag_id, ts DESC
+            """,
+            tag_ids,
+            at,
+        )
+        return [Sample(ts=r["ts"], tag_id=r["tag_id"], value=r["value"], quality=r["quality"]) for r in rows]
+
+    async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
+        pool = await self._conn()
+        rows = await pool.fetch(
+            """
+            SELECT ts, tag_id, value, quality, carried FROM (
+                SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality, true AS carried
+                FROM samples
+                WHERE tag_id = ANY($1) AND ts <= $2
+                ORDER BY tag_id, ts DESC
+                UNION ALL
+                SELECT ts, tag_id, value, quality, false
+                FROM samples
+                WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
+            ) s
+            ORDER BY tag_id, ts
+            """,
+            tag_ids,
             start,
             end,
-            json.dumps(labels or {}),
         )
-        return QueryResult(
-            metric=metric,
-            agg=agg,
-            step=f"{step_seconds(step)}s",
-            points=[Sample(ts=r["bucket"], value=float(r["value"])) for r in rows],
+        return [
+            Sample(ts=r["ts"], tag_id=r["tag_id"], value=r["value"], quality=r["quality"], carried=r["carried"])
+            for r in rows
+        ]
+
+    async def upsert_tags(self, tags: list[Tag]) -> None:
+        pool = await self._conn()
+        await pool.executemany(
+            """
+            INSERT INTO tags (id, name, unit) VALUES ($1, $2, $3)
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, unit = EXCLUDED.unit
+            """,
+            [(t.id, t.name, t.unit) for t in tags],
         )
 
-    async def latest(self, metric: str, labels: dict[str, str]) -> Point | None:
-        pool = await self._ensure()
-        row = await pool.fetchrow(
-            """
-            SELECT ts, metric, value, labels
-            FROM points
-            WHERE metric = $1 AND labels @> $2::jsonb
-            ORDER BY ts DESC
-            LIMIT 1
-            """,
-            metric,
-            json.dumps(labels or {}),
-        )
-        if row is None:
-            return None
-        raw = row["labels"]
-        if isinstance(raw, str):
-            raw = json.loads(raw)
-        return Point(ts=row["ts"], metric=row["metric"], value=float(row["value"]), labels=dict(raw or {}))
+    async def list_tags(self) -> list[Tag]:
+        pool = await self._conn()
+        rows = await pool.fetch("SELECT id, name, COALESCE(unit, '') AS unit FROM tags ORDER BY id")
+        return [Tag(id=r["id"], name=r["name"], unit=r["unit"]) for r in rows]
 
     async def close(self) -> None:
         if self._pool is not None:

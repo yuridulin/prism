@@ -1,30 +1,16 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Protocol
 
-from app.models import Point, QueryResult
+from app.models import Sample, Tag
 
 
 class Store(Protocol):
     name: str
 
     async def ping(self) -> None: ...
-    async def write(self, points: list[Point]) -> None: ...
-    async def query(
-        self,
-        metric: str,
-        start: datetime,
-        end: datetime,
-        step: timedelta,
-        agg: str,
-        labels: dict[str, str],
-    ) -> QueryResult: ...
-    async def latest(self, metric: str, labels: dict[str, str]) -> Point | None: ...
+    async def write(self, samples: list[Sample]) -> None: ...
+    async def locf(self, tag_ids: list[int], at: datetime) -> list[Sample]: ...
+    async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]: ...
+    async def upsert_tags(self, tags: list[Tag]) -> None: ...
+    async def list_tags(self) -> list[Tag]: ...
     async def close(self) -> None: ...
-
-
-def agg_sql(agg: str) -> str:
-    return {"min": "min", "max": "max", "sum": "sum", "count": "count"}.get(agg, "avg")
-
-
-def step_seconds(step: timedelta) -> int:
-    return max(int(step.total_seconds()), 1)

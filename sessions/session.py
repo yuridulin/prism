@@ -15,12 +15,27 @@ DEFAULTS_PATH = SESSIONS_DIR / "defaults.yaml"
 CATALOG_PATH = SESSIONS_DIR / "catalog.yaml"
 
 RESOURCE_GROUPS = ("api", "storage", "bus", "observe", "generator")
-VALID_BACKENDS = ("go", "python")
-VALID_STORAGES = ("timescaledb", "clickhouse", "influxdb", "victoriametrics")
-API_SERVICE = {"go": "go-api", "python": "python-api"}
-API_URL = {"go": "http://go-api:8081", "python": "http://python-api:8082"}
-API_READY = {"go": "http://127.0.0.1:8081/readyz", "python": "http://127.0.0.1:8082/readyz"}
-API_META = {"go": "http://127.0.0.1:8081/v1/meta", "python": "http://127.0.0.1:8082/v1/meta"}
+VALID_BACKENDS = ("go", "python", "csharp", "rust")
+VALID_STORAGES = ("timescaledb", "clickhouse", "questdb", "influxdb", "victoriametrics")
+API_SERVICE = {"go": "go-api", "python": "python-api", "csharp": "csharp-api", "rust": "rust-api"}
+API_URL = {
+    "go": "http://go-api:8081",
+    "python": "http://python-api:8082",
+    "csharp": "http://csharp-api:8083",
+    "rust": "http://rust-api:8084",
+}
+API_READY = {
+    "go": "http://127.0.0.1:8081/readyz",
+    "python": "http://127.0.0.1:8082/readyz",
+    "csharp": "http://127.0.0.1:8083/readyz",
+    "rust": "http://127.0.0.1:8084/readyz",
+}
+API_META = {
+    "go": "http://127.0.0.1:8081/v1/meta",
+    "python": "http://127.0.0.1:8082/v1/meta",
+    "csharp": "http://127.0.0.1:8083/v1/meta",
+    "rust": "http://127.0.0.1:8084/v1/meta",
+}
 
 
 class SessionError(ValueError):
@@ -215,6 +230,8 @@ def compose_env(session: dict, pair: dict) -> dict[str, str]:
     env = {
         "GO_API_STORAGE": pair["storage"],
         "PYTHON_API_STORAGE": pair["storage"],
+        "CSHARP_API_STORAGE": pair["storage"],
+        "RUST_API_STORAGE": pair["storage"],
         "PRISM_STORAGE": pair["storage"],
         "LOAD_PROFILE": str(load["profile"]),
         "GENERATOR_DURATION": str(what["duration_seconds"]),
@@ -258,27 +275,113 @@ def parse_generator_output(text: str) -> dict:
     }
 
 
-def draft_conclusions(session: dict) -> str:
+def _prom(record: dict) -> dict:
+    rows = record.get("prometheus") or []
+    return rows[0] if rows else {}
+
+
+def _ms(seconds: float | None) -> float | None:
+    if seconds is None:
+        return None
+    return round(seconds * 1000, 3)
+
+
+def pair_scorecard(slug: str, record: dict) -> dict:
+    gen = record.get("generator") or {}
+    prom = _prom(record)
+    stats = record.get("resources") or {}
+    return {
+        "pair": slug,
+        "status": record.get("status"),
+        "ingest_rate": gen.get("ingest_rate") if gen.get("ingest_rate") is not None else prom.get("ingest_rate"),
+        "write_errors": gen.get("write_errors"),
+        "query_errors": gen.get("query_errors"),
+        "queries": gen.get("queries"),
+        "write_p95_ms": _ms(prom.get("write_p95_seconds")),
+        "locf_p95_ms": _ms(prom.get("locf_p95_seconds")),
+        "range_p95_ms": _ms(prom.get("range_p95_seconds")),
+        "storage_write_p95_ms": _ms(prom.get("storage_write_p95_seconds")),
+        "storage_locf_p95_ms": _ms(prom.get("storage_locf_p95_seconds")),
+        "storage_range_p95_ms": _ms(prom.get("storage_range_p95_seconds")),
+        "api_p95_ms": _ms(prom.get("api_p95_seconds")),
+        "cpu_api": (stats.get("api") or {}).get("cpu"),
+        "mem_api": (stats.get("api") or {}).get("mem"),
+        "cpu_storage": (stats.get("storage") or {}).get("cpu"),
+        "mem_storage": (stats.get("storage") or {}).get("mem"),
+    }
+
+
+def _rank(rows: list[dict], key: str, reverse: bool) -> list[str]:
+    scored = [row for row in rows if row.get("status") == "completed" and row.get(key) is not None]
+    scored.sort(key=lambda row: row[key], reverse=reverse)
+    return [row["pair"] for row in scored]
+
+
+def build_comparison(session: dict) -> dict:
     what = session.get("what") or {}
-    pairs = ((session.get("results") or {}).get("pairs") or {})
+    profile = (what.get("load") or {}).get("profile")
+    pairs = (session.get("results") or {}).get("pairs") or {}
+    rows = [pair_scorecard(slug, record) for slug, record in pairs.items()]
+    read_heavy = profile == "query-mix"
+    return {
+        "profile": profile,
+        "duration": what.get("duration"),
+        "envelope": what.get("resources"),
+        "how": (
+            "Одинаковый resource envelope и чистый старт на каждую пару. "
+            "Эффективнее та, что держит предложенный ingest без ошибок "
+            "и отвечает быстрее на locf/range. "
+            "storage_*_p95 показывает, где сидит задержка — в БД или в API."
+        ),
+        "primary": "read" if read_heavy else "write",
+        "rows": rows,
+        "ranks": {
+            "ingest_rate": _rank(rows, "ingest_rate", reverse=True),
+            "write_p95_ms": _rank(rows, "write_p95_ms", reverse=False),
+            "locf_p95_ms": _rank(rows, "locf_p95_ms", reverse=False),
+            "range_p95_ms": _rank(rows, "range_p95_ms", reverse=False),
+        },
+    }
+
+
+def format_comparison(comparison: dict) -> str:
     lines = [
-        "Черновик по цифрам. Заменить человеческим выводом.",
+        f"Сравнение пар: профиль {comparison.get('profile')} за {comparison.get('duration')}.",
+        comparison.get("how", ""),
         "",
-        f"Профиль {(what.get('load') or {}).get('profile')} за {what.get('duration')}, "
-        f"пары по очереди с чистым стартом.",
+        f"{'pair':<24} {'status':<10} {'ingest/s':>10} {'w_err':>6} {'q_err':>6} "
+        f"{'w p95':>8} {'locf':>8} {'range':>8} {'cpu api':>8} {'cpu db':>8}",
     ]
-    if not pairs:
-        lines.append("Результатов пар нет.")
-        return "\n".join(lines) + "\n"
-    for slug, row in pairs.items():
-        status = row.get("status")
-        gen = row.get("generator") or {}
-        prom = (row.get("prometheus") or [{}])[0] if row.get("prometheus") else {}
+    for row in comparison.get("rows") or []:
         lines.append(
-            f"- {slug} [{status}]: "
-            f"gen {gen.get('ingest_rate', 'n/a')} pts/s, "
-            f"prom {prom.get('ingest_rate', 'n/a')} pts/s, "
-            f"write p95 {prom.get('write_p95_seconds', 'n/a')}s, "
-            f"errors {gen.get('write_errors', 'n/a')}."
+            f"{row.get('pair', ''):<24} {str(row.get('status') or ''):<10} "
+            f"{_fmt(row.get('ingest_rate'), 10)} {_fmt(row.get('write_errors'), 6)} "
+            f"{_fmt(row.get('query_errors'), 6)} {_fmt(row.get('write_p95_ms'), 8)} "
+            f"{_fmt(row.get('locf_p95_ms'), 8)} {_fmt(row.get('range_p95_ms'), 8)} "
+            f"{_fmt(row.get('cpu_api'), 8)} {_fmt(row.get('cpu_storage'), 8)}"
         )
+    ranks = comparison.get("ranks") or {}
+    if ranks.get("ingest_rate"):
+        lines.append("")
+        lines.append("ingest: " + " > ".join(ranks["ingest_rate"]))
+    if ranks.get("locf_p95_ms"):
+        lines.append("locf:   " + " > ".join(ranks["locf_p95_ms"]) + "  (меньше p95 лучше)")
+    if ranks.get("range_p95_ms"):
+        lines.append("range:  " + " > ".join(ranks["range_p95_ms"]) + "  (меньше p95 лучше)")
     return "\n".join(lines) + "\n"
+
+
+def _fmt(value, width: int) -> str:
+    if value is None:
+        return f"{'n/a':>{width}}"
+    if isinstance(value, float):
+        return f"{value:{width}.1f}"
+    return f"{value!s:>{width}}"
+
+
+def draft_conclusions(session: dict) -> str:
+    comparison = build_comparison(session)
+    return (
+        "Черновик по цифрам. Заменить человеческим выводом.\n\n"
+        + format_comparison(comparison)
+    )

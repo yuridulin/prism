@@ -1,162 +1,130 @@
 # Prism
 
-Стенд для сравнения time-series стеков: один контракт, декларативные профили нагрузки, три слоя метрик.
+Стенд сравнения time-series стеков под задачу **каталога тегов** и append-only рядов.
+
+Запись: `ts` (UTC), `tag_id` (uint32), `value` (float), `quality` (OPC DA uint16, 192 = Good).
+
+Чтение:
+
+| Режим | Смысл |
+| --- | --- |
+| `locf` | last observation carried forward на момент `at` |
+| `range` | locf на `from` + все точки `(from, to]` |
+| `sample` | range, затем сетка с протяжкой LOCF |
+| `twavg` | range, затем средневзвешенное по времени |
+
+Первые два — основные. `sample` и `twavg` считаются в API-слое из `range`, чтобы сравнивать хранилища честно.
 
 | Слой | Варианты |
 | --- | --- |
-| API | Go (`:8081`), Python/FastAPI (`:8082`) |
-| Storage | TimescaleDB, ClickHouse, InfluxDB 2, VictoriaMetrics |
-| Шина | NATS JetStream |
-| Наблюдение | Prometheus + Grafana + native exporters |
+| API | Go `:8081`, Python `:8082`, C# `:8083`, Rust `:8084` |
+| Storage | QuestDB, ClickHouse, TimescaleDB, InfluxDB 2, VictoriaMetrics |
+| Шина | NATS JetStream (`prism.samples`) |
+| Наблюдение | Prometheus + Grafana |
 | Нагрузка | YAML-профили → генератор или k6 |
 
-Хранилище выбирается `PRISM_STORAGE` / `GO_API_STORAGE` / `PYTHON_API_STORAGE`.
+Хранилище: `PRISM_STORAGE` / `GO_API_STORAGE` / `PYTHON_API_STORAGE` / `CSHARP_API_STORAGE` / `RUST_API_STORAGE`.
 
 ## Быстрый старт
 
-Нужны Docker и Docker Compose v2.
-
 ```powershell
 copy .env.example .env
-docker compose up -d --build
+docker compose up -d --build go-api questdb nats prometheus
 ```
 
 ```powershell
 curl http://localhost:8081/v1/meta
-curl -X POST http://localhost:8081/v1/points -H "Content-Type: application/json" -d "{\"points\":[{\"metric\":\"cpu.usage\",\"value\":42.1,\"labels\":{\"host\":\"dev-001\"}}]}"
-curl -X POST http://localhost:8081/v1/latest -H "Content-Type: application/json" -d "{\"metric\":\"cpu.usage\"}"
+curl -X POST http://localhost:8081/v1/write -H "Content-Type: application/json" -d "{\"samples\":[{\"tag_id\":1,\"value\":42.1,\"quality\":192}]}"
+curl -X POST http://localhost:8081/v1/locf -H "Content-Type: application/json" -d "{\"tag_ids\":[1],\"at\":\"2026-08-18T18:00:00Z\"}"
+curl -X POST http://localhost:8081/v1/range -H "Content-Type: application/json" -d "{\"tag_ids\":[1],\"from\":\"2026-08-18T17:00:00Z\",\"to\":\"2026-08-18T18:00:00Z\"}"
 ```
 
 - Grafana: http://localhost:3000 (`admin` / `prism`)
+- QuestDB console: http://localhost:9001
 - Prometheus: http://localhost:9090
-
-## Профили нагрузки
-
-Источник правды — `profiles/*.yaml`. Новый сценарий = новый файл, без правок генератора.
-
-| Профиль | Зачем |
-| --- | --- |
-| `iot-steady` | Базовый непрерывный ingest |
-| `high-cardinality` | Много серий, давление на индексы и теги |
-| `burst` | Короткий write-spike + небольшой out-of-order |
-| `query-mix` | Ingest + range/latest по HTTP |
-
-```powershell
-$env:LOAD_PROFILE="query-mix"
-docker compose --profile load run --rm generator
-```
-
-Локально:
-
-```powershell
-pip install -r ingest/generator/requirements.txt
-python ingest/generator/generator.py --list
-python ingest/generator/generator.py --profile burst --transport http --http-url http://localhost:8081
-python bench/run.py --profile query-mix --mode generator --base-url http://localhost:8081
-python bench/run.py --profile query-mix --mode k6 --base-url http://localhost:8081
-```
-
-Поля профиля (расширяется без смены кода):
-
-```yaml
-name: example
-transport: nats          # nats | http
-duration: 0              # секунды, 0 = пока не остановят
-ingest:
-  enabled: true
-  rate: 2000             # points/s
-  batch: 100
-  workers: 1
-  metrics: [cpu.usage]
-  labels:
-    host: { prefix: dev-, count: 50, width: 3 }
-    site: { values: [lab] }
-  out_of_order: 0.0
-  late_ms: 0
-query:
-  enabled: false
-  rate: 40
-  mix:
-    - { op: query, weight: 70, window: 15m, step: 1m, agg: avg }
-    - { op: latest, weight: 30 }
-```
-
-`TARGET` / `--transport` и `DURATION` перекрывают профиль, если заданы.
-
-## Сессии
-
-Прогон — это запись в `sessions/`: когда, что, зачем, результаты, выводы. Их будет много; каталог — `sessions/catalog.yaml`.
-
-Стартовые характеристики новой сессии лежат в `sessions/defaults.yaml`: 5m, `iot-steady`, общий resource envelope, список пар.
-
-Диспетчер гоняет **пары по очереди**. На каждую: `down -v` → только её API и БД → прогон → запись → снова `down -v`. Соседние стеки не стартуют.
-
-```powershell
-pip install -r sessions/requirements.txt
-python sessions/run.py new --why "Базовый write-path"
-python sessions/run.py run
-python sessions/run.py new --why "Только ClickHouse" --pairs go:clickhouse,python:clickhouse --run
-python sessions/run.py run --from-pair python-influxdb
-python sessions/run.py list
-python sessions/run.py conclude <id> --text "Go/Timescale держит rate, Python/Influx хуже по p95."
-```
-
-## Контракт API
-
-Канонические методы — POST. GET оставлен для отладки. Ошибки всегда `{ "error": { "code", "message" } }`.
-
-```
-POST /v1/points     { "points": [...] }           → { "written": N }
-POST /v1/query      { metric, from, to, step, agg, labels }
-POST /v1/latest     { metric, labels }
-GET  /v1/meta       backend, storage, contract, ops
-```
-
-Коды ошибок: `invalid_request`, `not_found`, `storage_unavailable`, `storage_error`.
 
 Полный контракт: [contracts/openapi.yaml](contracts/openapi.yaml).
 
-## Метрики
+## Сессии
 
-Три слоя с одинаковыми именами в Go и Python. Новый адаптер хранилища оборачивается в `Observed` / `ObservedStore` и сразу пишет storage-метрики.
+Диспетчер гоняет **пары по очереди**: `down -v` → только API и БД пары → прогон → запись → снова `down -v`.
 
-| Слой | Метрики | Что измеряет |
-| --- | --- | --- |
-| `api` | `prism_api_requests_total`, `prism_api_request_duration_seconds` | HTTP route/method/status |
-| `backend` | `prism_backend_ops_total`, `prism_backend_op_duration_seconds`, `prism_backend_items_total` | write/query/latest, source=`http`\|`nats` |
-| `storage` | `prism_storage_ops_total`, `prism_storage_op_duration_seconds`, `prism_storage_up` | вызов адаптера БД |
+Стартовые пары в `sessions/defaults.yaml`: Go/QuestDB, Go/ClickHouse, C#/QuestDB, Rust/QuestDB.
 
-Лейблы: `backend`, `storage`, `op`, `source`, `result` (`ok` / `error` / `not_found`).
-
-Native scrape рядом:
-
-- TimescaleDB — postgres-exporter
-- ClickHouse — `/metrics` на `:9363`
-- InfluxDB — `/metrics`
-- VictoriaMetrics — `/metrics`
-- NATS — monitor `:8222`
-
-Новая БД: адаптер + scrape job в `infra/prometheus/prometheus.yml`. Новый op: те же `ObserveBackend` / `observe_backend`.
-
-## Сменить хранилище
-
-```env
-GO_API_STORAGE=clickhouse
-PYTHON_API_STORAGE=victoriametrics
+```powershell
+pip install -r sessions/requirements.txt
+python sessions/run.py new --why "LOCF и range на тегах"
+python sessions/run.py run
+python sessions/run.py new --why "Только ClickHouse" --pairs go:clickhouse,csharp:clickhouse,rust:clickhouse --run
 ```
 
-Значения: `timescaledb`, `clickhouse`, `influxdb`, `victoriametrics`.
+## Профили
 
-В сессии пары идут по одной. Полный `docker compose up` по-прежнему поднимает весь стенд для ручной отладки.
+| Профиль | Зачем |
+| --- | --- |
+| `iot-steady` | Базовый ingest по 250 тегам |
+| `high-cardinality` | 10k тегов |
+| `burst` | write-spike + out-of-order |
+| `query-mix` | ingest + locf/range/sample/twavg |
+
+```yaml
+ingest:
+  tag_start: 1
+  tag_count: 250
+  good_ratio: 0.98   # доля OPC Good (192)
+query:
+  mix:
+    - { op: locf, weight: 50 }
+    - { op: range, weight: 40, window: 15m }
+```
+
+## Контракт
+
+```
+POST /v1/write   { "samples": [{ ts, tag_id, value, quality }] }
+POST /v1/read    { mode, tag_ids, at? | from?, to?, step? }
+POST /v1/locf    alias mode=locf
+POST /v1/range   alias mode=range
+GET  /v1/tags    каталог
+POST /v1/tags    upsert каталога
+GET  /v1/meta
+```
+
+`quality`: OPC DA word. 192 Good, 64 Uncertain, 0 Bad.
+
+## Как сравниваем пары
+
+Каждая пара получает один и тот же resource envelope и чистый старт. Эффективность — не «кто красивее в Grafana», а кто при этих лимитах:
+
+1. Держит предложенный ingest без ошибок (`ingest_rate`, `write_errors`).
+2. Быстрее отвечает на основные чтения (`locf` / `range` p95).
+3. Тратит время в БД, а не в API (`storage_*_p95` vs backend/API p95).
+4. Укладывается в CPU/RAM конверта (снимок `docker stats` в конце прогона).
+
+После сессии:
+
+```
+sessions/<id>/comparison.yaml          # таблица и ранги
+sessions/<id>/session.yaml             # conclusions — черновик той же таблицы
+sessions/<id>/pairs/<pair>/pair.yaml   # сырые цифры одной пары
+python sessions/run.py compare <id>    # печать scorecard
+```
+
+Писать `conclude` имеет смысл уже поверх этих цифр: почему locf у QuestDB быстрее, а write у ClickHouse держит rate.
+
+## Метрики
+
+Те же три слоя: `api`, `backend` (`write` / `locf` / `range` / `sample` / `twavg`), `storage`.
+Новый адаптер оборачивается в `Observed` и сразу пишет storage-метрики.
 
 ## Порты
 
 | Сервис | Порт |
 | --- | --- |
-| Go API | 8081 |
-| Python API | 8082 |
-| TimescaleDB | 5432 |
+| Go / Python / C# / Rust | 8081 / 8082 / 8083 / 8084 |
+| QuestDB HTTP / PG / ILP | 9001 / 8812 / 9009 |
 | ClickHouse HTTP / native | 8123 / 9000 |
+| TimescaleDB | 5432 |
 | InfluxDB | 8086 |
 | VictoriaMetrics | 8428 |
 | NATS / monitor | 4222 / 8222 |

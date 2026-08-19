@@ -1,33 +1,17 @@
 name: high-cardinality
-description: Many series at once. Stresses indexes, tag cardinality, and memory.
+description: Many tags, pressure on indexes and LOCF lookups.
 
 transport: nats
 duration: 0
 
 ingest:
   enabled: true
-  rate: 5000
-  batch: 250
-  workers: 2
-  metrics:
-    - cpu.usage
-    - mem.used
-    - disk.io
-    - net.rx
-    - net.tx
-    - temp.c
-    - humidity
-  labels:
-    host:
-      prefix: host-
-      count: 200
-      width: 3
-    device:
-      prefix: sensor-
-      count: 25
-      width: 2
-    site:
-      values: [lab, edge, dc1]
+  rate: 4000
+  batch: 200
+  workers: 1
+  tag_start: 1
+  tag_count: 10000
+  good_ratio: 0.97
   out_of_order: 0.0
   late_ms: 0
 

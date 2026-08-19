@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"prism/go-api/internal/apperr"
 	"prism/go-api/internal/config"
@@ -11,14 +12,16 @@ import (
 
 var ErrNotFound = apperr.ErrNotFound
 
-var Supported = []string{"timescaledb", "clickhouse", "influxdb", "victoriametrics"}
+var Supported = []string{"timescaledb", "clickhouse", "questdb", "influxdb", "victoriametrics"}
 
 type Store interface {
 	Name() string
 	Ping(ctx context.Context) error
-	Write(ctx context.Context, points []model.Point) error
-	Query(ctx context.Context, q model.Query) (*model.QueryResult, error)
-	Latest(ctx context.Context, metric string, labels map[string]string) (*model.Point, error)
+	Write(ctx context.Context, samples []model.Sample) error
+	Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error)
+	Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error)
+	UpsertTags(ctx context.Context, tags []model.Tag) error
+	ListTags(ctx context.Context) ([]model.Tag, error)
 	Close() error
 }
 
@@ -32,6 +35,8 @@ func New(cfg config.Config) (Store, error) {
 		inner, err = NewTimescale(cfg.PostgresDSN)
 	case "clickhouse":
 		inner, err = NewClickHouse(cfg.ClickHouseDSN)
+	case "questdb":
+		inner, err = NewQuestDB(cfg.QuestDBURL, cfg.QuestDBILP)
 	case "influxdb":
 		inner, err = NewInflux(cfg)
 	case "victoriametrics":
@@ -43,19 +48,4 @@ func New(cfg config.Config) (Store, error) {
 		return nil, err
 	}
 	return Observe(inner), nil
-}
-
-func aggSQL(agg string) string {
-	switch agg {
-	case "min":
-		return "min"
-	case "max":
-		return "max"
-	case "sum":
-		return "sum"
-	case "count":
-		return "count"
-	default:
-		return "avg"
-	}
 }

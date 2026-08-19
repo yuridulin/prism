@@ -2,13 +2,11 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"prism/go-api/internal/metrics"
@@ -34,11 +32,12 @@ func New(st store.Store) *Server {
 	r.Get("/readyz", s.ready)
 	r.Handle("/metrics", promhttp.Handler())
 	r.Get("/v1/meta", s.meta)
-	r.Post("/v1/points", s.write)
-	r.Post("/v1/query", s.queryPOST)
-	r.Get("/v1/query", s.queryGET)
-	r.Post("/v1/latest", s.latestPOST)
-	r.Get("/v1/latest", s.latestGET)
+	r.Get("/v1/tags", s.listTags)
+	r.Post("/v1/tags", s.upsertTags)
+	r.Post("/v1/write", s.write)
+	r.Post("/v1/read", s.read)
+	r.Post("/v1/locf", s.locf)
+	r.Post("/v1/range", s.rangeOnly)
 	s.mux = r
 	return s
 }
@@ -75,150 +74,116 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
 		return
 	}
-	if len(req.Points) == 0 {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "points is required")
+	if len(req.Samples) == 0 {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "samples is required")
 		return
 	}
 	now := time.Now().UTC()
-	for i := range req.Points {
-		if req.Points[i].Metric == "" {
-			writeError(w, http.StatusBadRequest, codeInvalidRequest, "metric is required")
-			return
-		}
-		if req.Points[i].TS.IsZero() {
-			req.Points[i].TS = now
-		}
-		req.Points[i].Labels = model.NormalizeLabels(req.Points[i].Labels)
+	samples := make([]model.Sample, 0, len(req.Samples))
+	for _, raw := range req.Samples {
+		samples = append(samples, raw.Normalize(now))
 	}
 	start := time.Now()
-	err := s.store.Write(r.Context(), req.Points)
-	metrics.ObserveBackend(s.store.Name(), "write", "http", len(req.Points), time.Since(start), err)
+	err := s.store.Write(r.Context(), samples)
+	metrics.ObserveBackend(s.store.Name(), "write", "http", len(samples), time.Since(start), err)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeStorageError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, model.WriteResponse{Written: len(req.Points)})
+	writeJSON(w, http.StatusOK, model.WriteResponse{Written: len(samples)})
 }
 
-func (s *Server) queryPOST(w http.ResponseWriter, r *http.Request) {
-	var req model.QueryRequest
+func (s *Server) locf(w http.ResponseWriter, r *http.Request) {
+	var req model.ReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
 		return
 	}
-	s.serveQuery(w, r, req)
+	req.Mode = "locf"
+	s.serveRead(w, r, req)
 }
 
-func (s *Server) queryGET(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	from, err := time.Parse(time.RFC3339, q.Get("from"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "from must be RFC3339")
-		return
-	}
-	to, err := time.Parse(time.RFC3339, q.Get("to"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "to must be RFC3339")
-		return
-	}
-	labels, err := parseLabels(q.Get("labels"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "labels must be a JSON object")
-		return
-	}
-	s.serveQuery(w, r, model.QueryRequest{
-		Metric: q.Get("metric"),
-		From:   from,
-		To:     to,
-		Step:   q.Get("step"),
-		Agg:    q.Get("agg"),
-		Labels: labels,
-	})
-}
-
-func (s *Server) serveQuery(w http.ResponseWriter, r *http.Request, req model.QueryRequest) {
-	if req.Metric == "" {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "metric is required")
-		return
-	}
-	if req.From.IsZero() || req.To.IsZero() {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "from and to are required")
-		return
-	}
-	if req.Agg == "" {
-		req.Agg = "avg"
-	}
-	if !model.ValidAgg(req.Agg) {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid agg")
-		return
-	}
-	q := model.NormalizeQuery(req)
-	start := time.Now()
-	res, err := s.store.Query(r.Context(), q)
-	items := 0
-	if res != nil {
-		items = len(res.Points)
-		res.Step = q.StepRaw
-	}
-	metrics.ObserveBackend(s.store.Name(), "query", "http", items, time.Since(start), err)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, codeStorageError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *Server) latestPOST(w http.ResponseWriter, r *http.Request) {
-	var req model.LatestRequest
+func (s *Server) rangeOnly(w http.ResponseWriter, r *http.Request) {
+	var req model.ReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
 		return
 	}
-	s.serveLatest(w, r, req)
+	req.Mode = "range"
+	s.serveRead(w, r, req)
 }
 
-func (s *Server) latestGET(w http.ResponseWriter, r *http.Request) {
-	labels, err := parseLabels(r.URL.Query().Get("labels"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "labels must be a JSON object")
+func (s *Server) read(w http.ResponseWriter, r *http.Request) {
+	var req model.ReadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
 		return
 	}
-	s.serveLatest(w, r, model.LatestRequest{
-		Metric: r.URL.Query().Get("metric"),
-		Labels: labels,
-	})
+	s.serveRead(w, r, req)
 }
 
-func (s *Server) serveLatest(w http.ResponseWriter, r *http.Request, req model.LatestRequest) {
-	if req.Metric == "" {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "metric is required")
+func (s *Server) serveRead(w http.ResponseWriter, r *http.Request, req model.ReadRequest) {
+	if !model.ValidMode(req.Mode) {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "mode must be locf, range, sample or twavg")
 		return
 	}
+	if len(req.TagIDs) == 0 {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "tag_ids is required")
+		return
+	}
+	var (
+		raw []model.Sample
+		err error
+	)
 	start := time.Now()
-	p, err := s.store.Latest(r.Context(), req.Metric, model.NormalizeLabels(req.Labels))
-	items := 0
-	if p != nil {
-		items = 1
-	}
-	metrics.ObserveBackend(s.store.Name(), "latest", "http", items, time.Since(start), err)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, codeNotFound, "not found")
+	switch req.Mode {
+	case "locf":
+		if req.At.IsZero() {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "at is required")
 			return
 		}
+		raw, err = s.store.Locf(r.Context(), req.TagIDs, req.At.UTC())
+	default:
+		if req.From.IsZero() || req.To.IsZero() {
+			writeError(w, http.StatusBadRequest, codeInvalidRequest, "from and to are required")
+			return
+		}
+		raw, err = s.store.Range(r.Context(), req.TagIDs, req.From.UTC(), req.To.UTC())
+	}
+	items := len(raw)
+	metrics.ObserveBackend(s.store.Name(), req.Mode, "http", items, time.Since(start), err)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeStorageError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, model.Assemble(req.Mode, req, raw))
 }
 
-func parseLabels(raw string) (map[string]string, error) {
-	if raw == "" {
-		return map[string]string{}, nil
+func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {
+	tags, err := s.store.ListTags(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeStorageError, err.Error())
+		return
 	}
-	var labels map[string]string
-	if err := json.Unmarshal([]byte(raw), &labels); err != nil {
-		return nil, err
+	if tags == nil {
+		tags = []model.Tag{}
 	}
-	return labels, nil
+	writeJSON(w, http.StatusOK, model.TagList{Tags: tags})
+}
+
+func (s *Server) upsertTags(w http.ResponseWriter, r *http.Request) {
+	var req model.TagWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
+		return
+	}
+	if len(req.Tags) == 0 {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "tags is required")
+		return
+	}
+	if err := s.store.UpsertTags(r.Context(), req.Tags); err != nil {
+		writeError(w, http.StatusInternalServerError, codeStorageError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, model.TagWriteResponse{Upserted: len(req.Tags)})
 }

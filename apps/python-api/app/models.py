@@ -3,52 +3,72 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Agg = Literal["avg", "min", "max", "sum", "count"]
-CONTRACT = "v1"
-OPS = ["write", "query", "latest"]
+CONTRACT = "v1.1"
+OPS = ["write", "locf", "range", "sample", "twavg", "tags"]
+QUALITY_GOOD = 192
+ReadMode = Literal["locf", "range", "sample", "twavg"]
 
 
-class Point(BaseModel):
+class Sample(BaseModel):
     ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metric: str
+    tag_id: int
     value: float
-    labels: dict[str, str] = Field(default_factory=dict)
+    quality: int = QUALITY_GOOD
+    carried: bool = False
 
 
 class WriteRequest(BaseModel):
-    points: list[Point]
+    samples: list[Sample]
 
 
 class WriteResponse(BaseModel):
     written: int
 
 
-class QueryRequest(BaseModel):
+class Tag(BaseModel):
+    id: int
+    name: str
+    unit: str = ""
+
+
+class TagList(BaseModel):
+    tags: list[Tag]
+
+
+class TagWriteRequest(BaseModel):
+    tags: list[Tag]
+
+
+class TagWriteResponse(BaseModel):
+    upserted: int
+
+
+class ReadRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    metric: str
-    from_: datetime = Field(alias="from")
-    to: datetime
+    mode: ReadMode
+    tag_ids: list[int]
+    at: datetime | None = None
+    from_: datetime | None = Field(default=None, alias="from")
+    to: datetime | None = None
     step: str = "1m"
-    agg: Agg = "avg"
-    labels: dict[str, str] = Field(default_factory=dict)
 
 
-class LatestRequest(BaseModel):
-    metric: str
-    labels: dict[str, str] = Field(default_factory=dict)
+class Series(BaseModel):
+    tag_id: int
+    value: float | None = None
+    samples: list[Sample] = Field(default_factory=list)
 
 
-class Sample(BaseModel):
-    ts: datetime
-    value: float
+class ReadResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
 
-
-class QueryResult(BaseModel):
-    metric: str
-    agg: str
-    step: str
-    points: list[Sample]
+    mode: ReadMode
+    at: datetime | None = None
+    from_: datetime | None = Field(default=None, alias="from")
+    to: datetime | None = None
+    step: str | None = None
+    series: list[Series]
 
 
 class Meta(BaseModel):

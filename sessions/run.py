@@ -20,9 +20,12 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from session import (  # noqa: E402
     API_META,
     API_READY,
+    API_SERVICE,
     SessionError,
+    build_comparison,
     draft_conclusions,
     dump_yaml,
+    format_comparison,
     load_session,
     list_session_ids,
     new_session,
@@ -33,6 +36,7 @@ from session import (  # noqa: E402
     parse_generator_output,
     rebuild_catalog,
     save_session,
+    session_dir,
     utcnow,
     write_compose_env,
 )
@@ -122,8 +126,74 @@ def collect_prometheus(window: str, backend: str, storage: str) -> list[dict]:
                 "histogram_quantile(0.95, "
                 f'sum by (le) (rate(prism_backend_op_duration_seconds_bucket{{op="write",{match}}}[{window}])))'
             ),
+            "locf_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_backend_op_duration_seconds_bucket{{op="locf",{match}}}[{window}])))'
+            ),
+            "range_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_backend_op_duration_seconds_bucket{{op="range",{match}}}[{window}])))'
+            ),
+            "storage_write_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_storage_op_duration_seconds_bucket{{op="write",{match}}}[{window}])))'
+            ),
+            "storage_locf_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_storage_op_duration_seconds_bucket{{op="locf",{match}}}[{window}])))'
+            ),
+            "storage_range_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_storage_op_duration_seconds_bucket{{op="range",{match}}}[{window}])))'
+            ),
+            "api_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_api_request_duration_seconds_bucket{{{match}}}[{window}])))'
+            ),
+            "locf_error_rate": first(
+                f'sum(rate(prism_backend_ops_total{{op="locf",result="error",{match}}}[{window}]))'
+            ),
+            "range_error_rate": first(
+                f'sum(rate(prism_backend_ops_total{{op="range",result="error",{match}}}[{window}]))'
+            ),
         }
     ]
+
+
+def collect_docker_stats(pair: dict) -> dict:
+    proc = subprocess.run(
+        ["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        return {"error": (proc.stderr or proc.stdout or "").strip()}
+    api_name = API_SERVICE[pair["backend"]]
+    storage_name = pair["storage"]
+    out = {"raw": []}
+    for line in (proc.stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        name, cpu, mem = parts[0], parts[1], parts[2]
+        row = {"name": name, "cpu": cpu, "mem": mem.split("/")[0].strip()}
+        out["raw"].append(row)
+        lowered = name.lower()
+        if api_name in lowered:
+            out["api"] = {"cpu": cpu, "mem": row["mem"]}
+        if storage_name in lowered and "exporter" not in lowered:
+            out["storage"] = {"cpu": cpu, "mem": row["mem"]}
+    return out
+
+
+def write_comparison(session: dict) -> Path:
+    comparison = build_comparison(session)
+    path = session_dir(session["id"]) / "comparison.yaml"
+    dump_yaml(path, comparison)
+    print(format_comparison(comparison), end="")
+    return path
 
 
 def collect_meta(backend: str) -> dict:
@@ -169,6 +239,7 @@ def run_pair(session: dict, pair: dict) -> dict:
             record["prometheus"] = collect_prometheus(window, pair["backend"], pair["storage"])
         except SessionError as exc:
             record["prometheus_error"] = str(exc)
+        record["resources"] = collect_docker_stats(pair)
         record["status"] = "completed"
     except Exception as exc:
         record["status"] = "failed"
@@ -224,16 +295,20 @@ def cmd_run(args: argparse.Namespace) -> int:
             slug = pair_slug(pair)
             record = run_pair(session, pair)
             session["results"]["pairs"][slug] = record
+            session["results"]["comparison"] = build_comparison(session)
             session["conclusions"] = draft_conclusions(session)
             save_session(session)
+            write_comparison(session)
             if record.get("status") != "completed":
                 failed = True
                 if args.fail_fast:
                     raise SessionError(f"pair {slug} failed, stopping")
         session["status"] = "failed" if failed else "completed"
         session["when"]["finished_at"] = utcnow()
+        session["results"]["comparison"] = build_comparison(session)
         session["conclusions"] = draft_conclusions(session)
         save_session(session)
+        write_comparison(session)
         print(f"{session['status']} {session_id}")
         return 1 if failed else 0
     except Exception as exc:
@@ -325,7 +400,18 @@ def build_parser() -> argparse.ArgumentParser:
     conclude.add_argument("id")
     conclude.add_argument("--text", required=True)
     conclude.set_defaults(func=cmd_conclude)
+
+    compare = sub.add_parser("compare", help="print the pair scorecard")
+    compare.add_argument("id")
+    compare.set_defaults(func=cmd_compare)
     return parser
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    session = load_session(args.id)
+    comparison = (session.get("results") or {}).get("comparison") or build_comparison(session)
+    print(format_comparison(comparison), end="")
+    return 0
 
 
 def main() -> int:

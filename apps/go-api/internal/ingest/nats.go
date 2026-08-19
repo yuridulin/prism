@@ -40,22 +40,27 @@ func Subscribe(url, subject string, st store.Store) (*Consumer, error) {
 func (c *Consumer) handle(msg *nats.Msg) {
 	var req model.WriteRequest
 	if err := json.Unmarshal(msg.Data, &req); err != nil {
-		var one model.Point
+		var one model.WriteSample
 		if err2 := json.Unmarshal(msg.Data, &one); err2 != nil {
 			metrics.ObserveBackend(c.store.Name(), "write", "nats", 0, 0, err)
 			log.Printf("nats decode error: %v", err)
 			return
 		}
-		req.Points = []model.Point{one}
+		req.Samples = []model.WriteSample{one}
 	}
-	if len(req.Points) == 0 {
+	if len(req.Samples) == 0 {
 		return
+	}
+	now := time.Now().UTC()
+	samples := make([]model.Sample, 0, len(req.Samples))
+	for _, raw := range req.Samples {
+		samples = append(samples, raw.Normalize(now))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	start := time.Now()
-	err := c.store.Write(ctx, req.Points)
-	metrics.ObserveBackend(c.store.Name(), "write", "nats", len(req.Points), time.Since(start), err)
+	err := c.store.Write(ctx, samples)
+	metrics.ObserveBackend(c.store.Name(), "write", "nats", len(samples), time.Since(start), err)
 	if err != nil {
 		log.Printf("nats write error: %v", err)
 	}

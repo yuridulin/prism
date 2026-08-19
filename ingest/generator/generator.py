@@ -12,7 +12,11 @@ import signal
 import time
 from datetime import datetime, timedelta, timezone
 
-from profile import Profile, ProfileError, load_profile, list_profiles, pick_mix, random_labels
+from profile import Profile, ProfileError, load_profile, list_profiles, pick_mix
+
+QUALITY_GOOD = 192
+QUALITY_BAD = 0
+QUALITY_UNCERTAIN = 64
 
 
 def env(name: str, default: str | None = None) -> str | None:
@@ -40,12 +44,12 @@ class Publisher:
 
             self._nc = await nats.connect(self.nats_url, name="prism-generator")
 
-    async def write(self, points: list[dict]) -> None:
-        body = json.dumps({"points": points}).encode()
+    async def write(self, samples: list[dict]) -> None:
+        body = json.dumps({"samples": samples}).encode()
         if self.transport == "http":
             assert self._http is not None
             resp = await self._http.post(
-                f"{self.http_url}/v1/points",
+                f"{self.http_url}/v1/write",
                 content=body,
                 headers={"Content-Type": "application/json"},
             )
@@ -54,16 +58,10 @@ class Publisher:
         assert self._nc is not None
         await self._nc.publish(self.subject, body)
 
-    async def query(self, payload: dict) -> None:
+    async def read(self, payload: dict) -> None:
         assert self._http is not None
-        resp = await self._http.post(f"{self.http_url}/v1/query", json=payload)
+        resp = await self._http.post(f"{self.http_url}/v1/read", json=payload)
         resp.raise_for_status()
-
-    async def latest(self, payload: dict) -> None:
-        assert self._http is not None
-        resp = await self._http.post(f"{self.http_url}/v1/latest", json=payload)
-        if resp.status_code not in {200, 404}:
-            resp.raise_for_status()
 
     async def close(self) -> None:
         if self._http is not None:
@@ -72,21 +70,29 @@ class Publisher:
             await self._nc.drain()
 
 
-def make_point(profile: Profile, rng: random.Random, now: datetime) -> dict:
+def pick_tag(profile: Profile, rng: random.Random) -> int:
+    return profile.ingest.tag_start + rng.randrange(profile.ingest.tag_count)
+
+
+def pick_quality(profile: Profile, rng: random.Random) -> int:
+    if rng.random() < profile.ingest.good_ratio:
+        return QUALITY_GOOD
+    return QUALITY_BAD if rng.random() < 0.5 else QUALITY_UNCERTAIN
+
+
+def make_sample(profile: Profile, rng: random.Random, now: datetime) -> dict:
     ts = now
     ingest = profile.ingest
     if ingest.out_of_order > 0 and rng.random() < ingest.out_of_order:
         lag = rng.randint(1, max(ingest.late_ms, 1))
         ts = now - timedelta(milliseconds=lag)
-    metric = rng.choice(ingest.metrics)
-    labels = random_labels(ingest.labels, rng)
-    phase = hash((metric, tuple(sorted(labels.items())))) % 1000
-    wave = 50 + 40 * math.sin((now.timestamp() + phase) / 15)
+    tag_id = pick_tag(profile, rng)
+    wave = 50 + 40 * math.sin((now.timestamp() + tag_id) / 15)
     return {
         "ts": ts.isoformat().replace("+00:00", "Z"),
-        "metric": metric,
+        "tag_id": tag_id,
         "value": round(max(0.0, wave + rng.uniform(-4, 4)), 4),
-        "labels": labels,
+        "quality": pick_quality(profile, rng),
     }
 
 
@@ -104,7 +110,7 @@ async def ingest_worker(profile: Profile, pub: Publisher, stop: asyncio.Event, s
     rng = random.Random()
     while not stop.is_set():
         tick = datetime.now(timezone.utc)
-        batch = [make_point(profile, rng, tick) for _ in range(spec.batch)]
+        batch = [make_sample(profile, rng, tick) for _ in range(spec.batch)]
         try:
             await pub.write(batch)
             stats["written"] += len(batch)
@@ -123,24 +129,22 @@ async def query_worker(profile: Profile, pub: Publisher, stop: asyncio.Event, st
     rng = random.Random()
     while not stop.is_set():
         item = pick_mix(spec.mix, rng)
-        metric = rng.choice(profile.ingest.metrics)
-        labels = random_labels(profile.ingest.labels, rng)
+        tag_ids = [pick_tag(profile, rng)]
+        now = datetime.now(timezone.utc)
         try:
-            if item.op == "latest":
-                await pub.latest({"metric": metric, "labels": labels})
+            if item.op == "locf":
+                await pub.read({"mode": "locf", "tag_ids": tag_ids, "at": now.isoformat().replace("+00:00", "Z")})
             else:
-                end = datetime.now(timezone.utc)
-                start = end - parse_window(item.window)
-                await pub.query(
-                    {
-                        "metric": metric,
-                        "from": start.isoformat().replace("+00:00", "Z"),
-                        "to": end.isoformat().replace("+00:00", "Z"),
-                        "step": item.step,
-                        "agg": item.agg,
-                        "labels": labels,
-                    }
-                )
+                start = now - parse_window(item.window)
+                payload = {
+                    "mode": item.op,
+                    "tag_ids": tag_ids,
+                    "from": start.isoformat().replace("+00:00", "Z"),
+                    "to": now.isoformat().replace("+00:00", "Z"),
+                }
+                if item.op == "sample":
+                    payload["step"] = item.step
+                await pub.read(payload)
             stats["queries"] += 1
         except Exception as exc:
             stats["query_errors"] += 1
@@ -179,7 +183,7 @@ async def run(profile: Profile, args: argparse.Namespace) -> None:
     print(
         f"generator profile={profile.name} transport={args.transport} "
         f"ingest={profile.ingest.rate}/s query={profile.query.rate}/s "
-        f"series≈{profile.sample_space_size()} duration={args.duration or 'inf'}",
+        f"tags={profile.sample_space_size()} duration={args.duration or 'inf'}",
         flush=True,
     )
     try:
@@ -207,7 +211,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transport", default=env("TARGET") or "", choices=("", "nats", "http"))
     parser.add_argument("--http-url", default=env("HTTP_URL", "http://localhost:8081"))
     parser.add_argument("--nats-url", default=env("NATS_URL", "nats://localhost:4222"))
-    parser.add_argument("--subject", default=env("NATS_SUBJECT", "prism.points"))
+    parser.add_argument("--subject", default=env("NATS_SUBJECT", "prism.samples"))
     parser.add_argument("--duration", type=float, default=None)
     return parser.parse_args()
 

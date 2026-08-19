@@ -17,6 +17,20 @@ scrape_configs:
           backend: python
           layer: api
 
+  - job_name: csharp-api
+    static_configs:
+      - targets: ["csharp-api:8083"]
+        labels:
+          backend: csharp
+          layer: api
+
+  - job_name: rust-api
+    static_configs:
+      - targets: ["rust-api:8084"]
+        labels:
+          backend: rust
+          layer: api
+
   - job_name: timescaledb
     static_configs:
       - targets: ["postgres-exporter:9187"]
@@ -29,6 +43,13 @@ scrape_configs:
       - targets: ["clickhouse:9363"]
         labels:
           storage: clickhouse
+          layer: db
+
+  - job_name: questdb
+    static_configs:
+      - targets: ["questdb:9003"]
+        labels:
+          storage: questdb
           layer: db
 
   - job_name: influxdb

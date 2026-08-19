@@ -11,6 +11,13 @@ Thumbs.db
 .vscode/
 *.swp
 
+# Rust
+apps/rust-api/target/
+
+# C#
+apps/csharp-api/bin/
+apps/csharp-api/obj/
+
 # Go
 apps/go-api/bin/
 ingest/generator/bin/
