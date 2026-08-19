@@ -40,10 +40,10 @@ services:
       timeout: 5s
       retries: 15
       start_period: 15s
-        ulimits:
-          nofile:
-            soft: 262144
-            hard: 262144
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
 
   questdb:
     image: questdb/questdb:8.2.2
@@ -105,6 +105,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.55.1
     restart: unless-stopped
+    user: "65534:65534"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"

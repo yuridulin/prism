@@ -1,0 +1,70 @@
+backend: rust
+storage: questdb
+status: completed
+when:
+  started_at: '2026-08-19T03:26:25Z'
+  finished_at: '2026-08-19T03:29:33Z'
+services:
+- nats
+- questdb
+- rust-api
+- prometheus
+generator:
+  profile: iot-steady
+  written: 354400
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 1968.9
+meta:
+  backend: rust
+  storage: questdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: rust
+  storage: questdb
+  ingest_rate: 1968.5714285714282
+  write_error_rate: null
+  write_p95_seconds: 0.004753961964627617
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.0047538298803805525
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: null
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 3.02MiB
+  - name: prism-nats-1
+    cpu: 0.05%
+    mem: 8.656MiB
+  - name: prism-prometheus-1
+    cpu: 0.08%
+    mem: 27.98MiB
+  - name: prism-questdb-1
+    cpu: 9.22%
+    mem: 386.8MiB
+  api:
+    cpu: 0.00%
+    mem: 3.02MiB
+  storage:
+    cpu: 9.22%
+    mem: 386.8MiB

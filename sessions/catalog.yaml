@@ -10,3 +10,15 @@ sessions:
   - go-timescaledb
   - python-influxdb
   path: sessions/20260818T174002-iot-steady/session.yaml
+- id: 20260819T031045-iot-steady
+  status: completed
+  created_at: '2026-08-19T03:10:45Z'
+  why: 'Тестовый прогон 3м на пару: scorecard locf/range/write'
+  profile: iot-steady
+  duration: 3m
+  pairs:
+  - go-questdb
+  - go-clickhouse
+  - csharp-questdb
+  - rust-questdb
+  path: sessions/20260819T031045-iot-steady/session.yaml

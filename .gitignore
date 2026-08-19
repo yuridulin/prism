@@ -43,3 +43,6 @@ node_modules/
 # Data volumes (if someone bind-mounts)
 data/
 *.log
+
+# Session noise (keep YAML scorecards, not generator dumps)
+sessions/**/generator.out

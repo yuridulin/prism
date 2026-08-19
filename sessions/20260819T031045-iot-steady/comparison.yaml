@@ -1,0 +1,104 @@
+profile: iot-steady
+duration: 3m
+envelope:
+  api:
+    cpus: '1.0'
+    memory: 512M
+  storage:
+    cpus: '1.0'
+    memory: 1G
+  bus:
+    cpus: '0.50'
+    memory: 256M
+  observe:
+    cpus: '0.50'
+    memory: 512M
+  generator:
+    cpus: '1.0'
+    memory: 512M
+how: Одинаковый resource envelope и чистый старт на каждую пару. Эффективнее та, что
+  держит предложенный ingest без ошибок и отвечает быстрее на locf/range. storage_*_p95
+  показывает, где сидит задержка — в БД или в API.
+primary: write
+rows:
+- pair: go-questdb
+  status: completed
+  ingest_rate: 1967.8
+  write_errors: 0
+  query_errors: 0
+  queries: 0
+  write_p95_ms: 4.752
+  locf_p95_ms: null
+  range_p95_ms: null
+  storage_write_p95_ms: 4.752
+  storage_locf_p95_ms: null
+  storage_range_p95_ms: null
+  api_p95_ms: null
+  cpu_api: 0.00%
+  mem_api: 44.05MiB
+  cpu_storage: 8.83%
+  mem_storage: 401.9MiB
+- pair: go-clickhouse
+  status: completed
+  ingest_rate: 1966.7
+  write_errors: 0
+  query_errors: 0
+  queries: 0
+  write_p95_ms: 4.923
+  locf_p95_ms: null
+  range_p95_ms: null
+  storage_write_p95_ms: 4.923
+  storage_locf_p95_ms: null
+  storage_range_p95_ms: null
+  api_p95_ms: null
+  cpu_api: 0.00%
+  mem_api: 25.37MiB
+  cpu_storage: 3.03%
+  mem_storage: 863.4MiB
+- pair: csharp-questdb
+  status: completed
+  ingest_rate: 1973.9
+  write_errors: 0
+  query_errors: 0
+  queries: 0
+  write_p95_ms: 4.756
+  locf_p95_ms: null
+  range_p95_ms: null
+  storage_write_p95_ms: 4.756
+  storage_locf_p95_ms: null
+  storage_range_p95_ms: null
+  api_p95_ms: null
+  cpu_api: 0.98%
+  mem_api: 130.3MiB
+  cpu_storage: 8.85%
+  mem_storage: 401.4MiB
+- pair: rust-questdb
+  status: completed
+  ingest_rate: 1968.9
+  write_errors: 0
+  query_errors: 0
+  queries: 0
+  write_p95_ms: 4.754
+  locf_p95_ms: null
+  range_p95_ms: null
+  storage_write_p95_ms: 4.754
+  storage_locf_p95_ms: null
+  storage_range_p95_ms: null
+  api_p95_ms: null
+  cpu_api: 0.00%
+  mem_api: 3.02MiB
+  cpu_storage: 9.22%
+  mem_storage: 386.8MiB
+ranks:
+  ingest_rate:
+  - csharp-questdb
+  - rust-questdb
+  - go-questdb
+  - go-clickhouse
+  write_p95_ms:
+  - go-questdb
+  - rust-questdb
+  - csharp-questdb
+  - go-clickhouse
+  locf_p95_ms: []
+  range_p95_ms: []

@@ -74,7 +74,7 @@ def http_get(url: str, timeout: float = 5.0) -> tuple[int, str]:
             return resp.status, resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as exc:
+    except Exception as exc:
         raise SessionError(f"request failed {url}: {exc}") from exc
 
 
