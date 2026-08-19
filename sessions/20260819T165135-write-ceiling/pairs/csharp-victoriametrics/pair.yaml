@@ -1,0 +1,70 @@
+backend: csharp
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-19T17:39:08Z'
+  finished_at: '2026-08-19T17:42:17Z'
+services:
+- nats
+- victoriametrics
+- csharp-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 22266500
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 123700.7
+meta:
+  backend: csharp
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: csharp
+  storage: victoriametrics
+  ingest_rate: 123833.77130158732
+  write_error_rate: null
+  write_p95_seconds: 0.004903709536089959
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.004903365945936883
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.00904926328070772
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 1.69%
+    mem: 71.13MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 8.273MiB
+  - name: prism-prometheus-1
+    cpu: 0.07%
+    mem: 32.81MiB
+  - name: prism-victoriametrics-1
+    cpu: 2.11%
+    mem: 110.9MiB
+  api:
+    cpu: 1.69%
+    mem: 71.13MiB
+  storage:
+    cpu: 2.11%
+    mem: 110.9MiB

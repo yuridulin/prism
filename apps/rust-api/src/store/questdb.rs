@@ -1,14 +1,21 @@
+use std::fmt::Write as _;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use url::Url;
 
-use super::{http_client, join_ids, Result, Store, StoreError};
+use super::{append_ilp_float, http_client, join_ids, Result, Store, StoreError};
 use crate::model::{Sample, Tag};
 
 pub struct QuestDb {
     base: String,
+    ilp_addr: String,
     client: reqwest::Client,
+    conn: Mutex<Option<TcpStream>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -20,11 +27,43 @@ struct QdbExec {
 }
 
 impl QuestDb {
-    pub fn new(http_url: &str) -> Self {
+    pub fn new(http_url: &str, ilp_addr: &str) -> Self {
+        let ilp_addr = ilp_addr
+            .trim()
+            .trim_start_matches("tcp://")
+            .trim_start_matches("ilp://")
+            .to_string();
         Self {
             base: http_url.trim_end_matches('/').to_string(),
+            ilp_addr,
             client: http_client(),
+            conn: Mutex::new(None),
         }
+    }
+
+    async fn send_ilp(&self, body: &[u8]) -> Result<()> {
+        match self.send_ilp_once(body).await {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                *self.conn.lock().await = None;
+                self.send_ilp_once(body).await
+            }
+        }
+    }
+
+    async fn send_ilp_once(&self, body: &[u8]) -> Result<()> {
+        let mut guard = self.conn.lock().await;
+        if guard.is_none() {
+            let stream = TcpStream::connect(&self.ilp_addr)
+                .await
+                .map_err(StoreError::new)?;
+            let _ = stream.set_nodelay(true);
+            *guard = Some(stream);
+        }
+        let stream = guard.as_mut().expect("ilp stream");
+        stream.write_all(body).await.map_err(StoreError::new)?;
+        stream.flush().await.map_err(StoreError::new)?;
+        Ok(())
     }
 
     async fn exec(&self, query: &str) -> Result<QdbExec> {
@@ -107,12 +146,15 @@ fn parse_samples(data: QdbExec, has_carried: bool) -> Result<Vec<Sample>> {
     Ok(out)
 }
 
-fn ilp_float(v: f64) -> String {
-    if v.fract() == 0.0 {
-        format!("{v:.1}")
-    } else {
-        format!("{v}")
-    }
+fn append_ilp_line(buf: &mut String, p: &Sample) {
+    let _ = write!(buf, "samples tag_id={}i,value=", p.tag_id);
+    append_ilp_float(buf, p.value);
+    let _ = write!(
+        buf,
+        ",quality={}i {}\n",
+        p.quality,
+        p.ts.timestamp_nanos_opt().unwrap_or(0)
+    );
 }
 
 #[async_trait]
@@ -130,29 +172,11 @@ impl Store for QuestDb {
         if samples.is_empty() {
             return Ok(());
         }
-        let mut body = String::new();
+        let mut body = String::with_capacity(samples.len() * 48);
         for p in samples {
-            body.push_str(&format!(
-                "samples tag_id={}i,value={},quality={}i {}\n",
-                p.tag_id,
-                ilp_float(p.value),
-                p.quality,
-                p.ts.timestamp_nanos_opt().unwrap_or(0)
-            ));
+            append_ilp_line(&mut body, p);
         }
-        let resp = self
-            .client
-            .post(format!("{}/write?precision=n", self.base))
-            .header("Content-Type", "text/plain")
-            .body(body)
-            .send()
-            .await?;
-        let status = resp.status();
-        if status.as_u16() >= 300 {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(StoreError::new(format!("questdb write {status}: {text}")));
-        }
-        Ok(())
+        self.send_ilp(body.as_bytes()).await
     }
 
     async fn locf(&self, tag_ids: &[u32], at: DateTime<Utc>) -> Result<Vec<Sample>> {

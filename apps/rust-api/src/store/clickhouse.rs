@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse::{Client, Row};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::{join_ids, Result, Store, StoreError};
@@ -11,7 +11,7 @@ pub struct ClickHouse {
     client: Client,
 }
 
-#[derive(Debug, Row, Deserialize)]
+#[derive(Debug, Row, Serialize, Deserialize)]
 struct SampleRow {
     ts: i64,
     tag_id: u32,
@@ -28,7 +28,7 @@ struct SampleRowCarried {
     carried: u8,
 }
 
-#[derive(Debug, Row, Deserialize)]
+#[derive(Debug, Row, Serialize, Deserialize)]
 struct TagRow {
     id: u32,
     name: String,
@@ -86,20 +86,19 @@ impl Store for ClickHouse {
         if samples.is_empty() {
             return Ok(());
         }
-        let mut sql = String::from("INSERT INTO samples (ts, tag_id, value, quality) VALUES ");
-        for (i, s) in samples.iter().enumerate() {
-            if i > 0 {
-                sql.push(',');
-            }
-            sql.push_str(&format!(
-                "(fromUnixTimestamp64Milli({}), {}, {}, {})",
-                s.ts.timestamp_millis(),
-                s.tag_id,
-                s.value as f32,
-                s.quality
-            ));
+        let mut insert = self.client.insert("samples").map_err(StoreError::new)?;
+        for s in samples {
+            insert
+                .write(&SampleRow {
+                    ts: s.ts.timestamp_millis(),
+                    tag_id: s.tag_id,
+                    value: s.value as f32,
+                    quality: s.quality,
+                })
+                .await
+                .map_err(StoreError::new)?;
         }
-        self.client.query(&sql).execute().await.map_err(StoreError::new)?;
+        insert.end().await.map_err(StoreError::new)?;
         Ok(())
     }
 
@@ -181,19 +180,18 @@ impl Store for ClickHouse {
         if tags.is_empty() {
             return Ok(());
         }
-        let mut sql = String::from("INSERT INTO tags (id, name, unit) VALUES ");
-        for (i, t) in tags.iter().enumerate() {
-            if i > 0 {
-                sql.push(',');
-            }
-            sql.push_str(&format!(
-                "({}, '{}', '{}')",
-                t.id,
-                t.name.replace('\'', "''"),
-                t.unit.replace('\'', "''")
-            ));
+        let mut insert = self.client.insert("tags").map_err(StoreError::new)?;
+        for t in tags {
+            insert
+                .write(&TagRow {
+                    id: t.id,
+                    name: t.name.clone(),
+                    unit: t.unit.clone(),
+                })
+                .await
+                .map_err(StoreError::new)?;
         }
-        self.client.query(&sql).execute().await.map_err(StoreError::new)?;
+        insert.end().await.map_err(StoreError::new)?;
         Ok(())
     }
 

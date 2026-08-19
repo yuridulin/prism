@@ -1,13 +1,16 @@
+use std::fmt::Write as _;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use url::Url;
 
-use super::{Catalog, Result, Store, StoreError};
+use super::{append_ilp_float, Catalog, Result, Store, StoreError};
 use crate::model::{Sample, Tag};
 
 pub struct VictoriaMetrics {
     base: String,
+    write_url: String,
     client: reqwest::Client,
     tags: Catalog,
 }
@@ -37,10 +40,13 @@ struct VmExportRow {
 
 impl VictoriaMetrics {
     pub fn new(base: &str) -> Self {
+        let base = base.trim_end_matches('/').to_string();
         Self {
-            base: base.trim_end_matches('/').to_string(),
+            write_url: format!("{base}/write?precision=ms"),
+            base,
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(15))
+                .pool_max_idle_per_host(16)
                 .build()
                 .expect("vm http client"),
             tags: Catalog::default(),
@@ -87,22 +93,13 @@ impl Store for VictoriaMetrics {
         if samples.is_empty() {
             return Ok(());
         }
-        let mut buf = String::new();
+        let mut buf = String::with_capacity(samples.len() * 48);
         for p in samples {
-            buf.push_str(&format!(
-                "prism_sample{{tag_id=\"{}\",quality=\"{}\"}} {} {}\n",
-                p.tag_id,
-                p.quality,
-                format_vm_value(p.value),
-                p.ts.timestamp_millis()
-            ));
+            let _ = write!(buf, "prism,tag_id={},quality={} sample=", p.tag_id, p.quality);
+            append_ilp_float(&mut buf, p.value);
+            let _ = write!(buf, " {}\n", p.ts.timestamp_millis());
         }
-        let resp = self
-            .client
-            .post(format!("{}/api/v1/import/prometheus", self.base))
-            .body(buf)
-            .send()
-            .await?;
+        let resp = self.client.post(&self.write_url).body(buf).send().await?;
         let status = resp.status();
         if status.as_u16() >= 300 {
             let text = resp.text().await.unwrap_or_default();
@@ -202,10 +199,3 @@ impl Store for VictoriaMetrics {
     }
 }
 
-fn format_vm_value(v: f64) -> String {
-    if v.fract() == 0.0 {
-        format!("{v:.1}")
-    } else {
-        format!("{v}")
-    }
-}

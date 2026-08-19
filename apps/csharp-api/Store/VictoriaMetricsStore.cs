@@ -1,6 +1,6 @@
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Prism.Api.Models;
@@ -16,7 +16,7 @@ public sealed class VictoriaMetricsStore : IStore
     public VictoriaMetricsStore(string url)
     {
         _base = url.TrimEnd('/');
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        _http = StoreUtil.CreatePooledHttp(TimeSpan.FromSeconds(15), _base + "/");
     }
 
     public string Name => "victoriametrics";
@@ -37,15 +37,23 @@ public sealed class VictoriaMetricsStore : IStore
             return;
         }
 
-        var sb = new StringBuilder();
+        using var buf = new ByteWriter(80 * samples.Count);
         foreach (var sample in samples)
         {
-            sb.Append(CultureInfo.InvariantCulture,
-                $"prism_sample{{tag_id=\"{sample.TagId}\",quality=\"{sample.Quality}\"}} {StoreUtil.FormatFloat(sample.Value)} {sample.Ts.ToUnixTimeMilliseconds()}\n");
+            buf.AppendAscii("prism_sample,tag_id=");
+            buf.AppendUInt(sample.TagId);
+            buf.AppendAscii(",quality=");
+            buf.AppendUShort(sample.Quality);
+            buf.AppendAscii(" value=");
+            buf.AppendIlpFloat(sample.Value);
+            buf.AppendByte((byte)' ');
+            buf.AppendLong(StoreUtil.UnixNano(sample.Ts));
+            buf.AppendByte((byte)'\n');
         }
 
-        using var content = new StringContent(sb.ToString(), Encoding.UTF8, "text/plain");
-        using var resp = await _http.PostAsync(_base + "/api/v1/import/prometheus", content, ct);
+        using var content = new ByteArrayContent(buf.Buffer, 0, buf.Length);
+        content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        using var resp = await _http.PostAsync("write?precision=ns", content, ct);
         await StoreUtil.EnsureSuccess(resp, "vm write", ct);
     }
 

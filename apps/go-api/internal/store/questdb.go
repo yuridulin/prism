@@ -1,10 +1,11 @@
 package store
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,16 +15,25 @@ import (
 	"prism/go-api/internal/model"
 )
 
+const ilpPoolSize = 8
+
 type QuestDB struct {
-	base   string
-	client *http.Client
+	base    string
+	ilpAddr string
+	client  *http.Client
+	conns   chan *ilpConn
+}
+
+type ilpConn struct {
+	c net.Conn
+	w *bufio.Writer
 }
 
 type qdbExec struct {
-	Query   string     `json:"query"`
-	Columns []qdbCol   `json:"columns"`
-	Dataset [][]any    `json:"dataset"`
-	Error   string     `json:"error"`
+	Query   string   `json:"query"`
+	Columns []qdbCol `json:"columns"`
+	Dataset [][]any  `json:"dataset"`
+	Error   string   `json:"error"`
 }
 
 type qdbCol struct {
@@ -31,16 +41,30 @@ type qdbCol struct {
 	Type string `json:"type"`
 }
 
-func NewQuestDB(httpURL, _ string) (*QuestDB, error) {
+func NewQuestDB(httpURL, ilpAddr string) (*QuestDB, error) {
+	if ilpAddr == "" {
+		ilpAddr = "questdb:9009"
+	}
 	return &QuestDB{
-		base:   strings.TrimRight(httpURL, "/"),
-		client: &http.Client{Timeout: 30 * time.Second},
+		base:    strings.TrimRight(httpURL, "/"),
+		ilpAddr: ilpAddr,
+		client:  newWriteHTTPClient(30 * time.Second),
+		conns:   make(chan *ilpConn, ilpPoolSize),
 	}, nil
 }
 
 func (s *QuestDB) Name() string { return "questdb" }
 
-func (s *QuestDB) Close() error { return nil }
+func (s *QuestDB) Close() error {
+	for {
+		select {
+		case c := <-s.conns:
+			c.close()
+		default:
+			return nil
+		}
+	}
+}
 
 func (s *QuestDB) Ping(ctx context.Context) error {
 	if err := s.ensure(ctx); err != nil {
@@ -67,26 +91,91 @@ func (s *QuestDB) Write(ctx context.Context, samples []model.Sample) error {
 	if len(samples) == 0 {
 		return nil
 	}
-	var b strings.Builder
-	for _, p := range samples {
-		fmt.Fprintf(&b, "samples tag_id=%di,value=%g,quality=%di %d\n",
-			p.TagID, p.Value, p.Quality, p.TS.UTC().UnixNano())
+	buf := getBuf()
+	defer putBuf(buf)
+	for i := range samples {
+		p := &samples[i]
+		buf.WriteString("samples tag_id=")
+		buf.WriteString(strconv.FormatUint(uint64(p.TagID), 10))
+		buf.WriteString("i,value=")
+		buf.WriteString(strconv.FormatFloat(p.Value, 'g', -1, 64))
+		buf.WriteString(",quality=")
+		buf.WriteString(strconv.FormatUint(uint64(p.Quality), 10))
+		buf.WriteString("i ")
+		buf.WriteString(strconv.FormatInt(p.TS.UTC().UnixNano(), 10))
+		buf.WriteByte('\n')
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base+"/write?precision=n", strings.NewReader(b.String()))
+	return s.sendILP(ctx, buf.Bytes())
+}
+
+func (s *QuestDB) sendILP(ctx context.Context, payload []byte) error {
+	c, err := s.acquire(ctx)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "text/plain")
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
+	if err := writeILP(ctx, c, payload); err != nil {
+		c.close()
+		c2, err2 := s.dial(ctx)
+		if err2 != nil {
+			return err
+		}
+		if err := writeILP(ctx, c2, payload); err != nil {
+			c2.close()
+			return err
+		}
+		s.release(c2)
+		return nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("questdb write %d: %s", resp.StatusCode, body)
-	}
+	s.release(c)
 	return nil
+}
+
+func (s *QuestDB) acquire(ctx context.Context) (*ilpConn, error) {
+	select {
+	case c := <-s.conns:
+		return c, nil
+	default:
+		return s.dial(ctx)
+	}
+}
+
+func (s *QuestDB) release(c *ilpConn) {
+	select {
+	case s.conns <- c:
+	default:
+		c.close()
+	}
+}
+
+func (s *QuestDB) dial(ctx context.Context) (*ilpConn, error) {
+	var d net.Dialer
+	c, err := d.DialContext(ctx, "tcp", s.ilpAddr)
+	if err != nil {
+		return nil, err
+	}
+	if tcp, ok := c.(*net.TCPConn); ok {
+		_ = tcp.SetNoDelay(true)
+		_ = tcp.SetKeepAlive(true)
+	}
+	return &ilpConn{c: c, w: bufio.NewWriterSize(c, 64<<10)}, nil
+}
+
+func writeILP(ctx context.Context, c *ilpConn, payload []byte) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = c.c.SetWriteDeadline(deadline)
+	} else {
+		_ = c.c.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	}
+	if _, err := c.w.Write(payload); err != nil {
+		return err
+	}
+	return c.w.Flush()
+}
+
+func (c *ilpConn) close() {
+	if c != nil && c.c != nil {
+		_ = c.c.Close()
+	}
 }
 
 func (s *QuestDB) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
@@ -163,7 +252,7 @@ func (s *QuestDB) exec(ctx context.Context, query string) (*qdbExec, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer closeHTTP(resp)
 	var out qdbExec
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err

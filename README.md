@@ -65,6 +65,7 @@ python sessions/run.py new --why "Только ClickHouse" --pairs go:clickhouse
 | `iot-steady` | Базовый ingest по 250 тегам |
 | `high-cardinality` | 10k тегов |
 | `burst` | write-spike + out-of-order |
+| `write-ceiling` | Потолок записи: HTTP, offer выше конверта |
 | `query-mix` | ingest + locf/range/sample/twavg |
 
 ```yaml

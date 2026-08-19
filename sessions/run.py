@@ -225,7 +225,7 @@ def run_pair(session: dict, pair: dict) -> dict:
         window = session["what"]["duration"]
         print(f"pair {slug}: load {window}")
         proc = compose(
-            ["--profile", "load", "run", "--rm", "--no-deps", "generator"],
+            ["--profile", "load", "run", "--rm", "--build", "--no-deps", "generator"],
             env_file,
             capture=True,
         )
@@ -265,7 +265,9 @@ def cmd_new(args: argparse.Namespace) -> int:
     print(f"created {session['id']} ({path})")
     print("pairs: " + ", ".join(pair_slug(p) for p in session["what"]["pairs"]))
     if args.run:
-        return cmd_run(argparse.Namespace(id=session["id"], from_pair=None, fail_fast=args.fail_fast))
+        return cmd_run(
+            argparse.Namespace(id=session["id"], from_pair=None, only_pair=None, fail_fast=args.fail_fast)
+        )
     return 0
 
 
@@ -277,7 +279,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         raise SessionError("session has no pairs")
     slugs = [pair_slug(p) for p in pairs]
     start_at = 0
-    if args.from_pair:
+    stop_at = len(pairs)
+    if args.only_pair:
+        if args.only_pair not in slugs:
+            raise SessionError(f"unknown pair {args.only_pair!r}")
+        start_at = slugs.index(args.only_pair)
+        stop_at = start_at + 1
+    elif args.from_pair:
         if args.from_pair not in slugs:
             raise SessionError(f"unknown pair {args.from_pair!r}")
         start_at = slugs.index(args.from_pair)
@@ -287,11 +295,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     save_session(session)
     print(
         f"dispatch {session_id} duration={session['what']['duration']} "
-        f"profile={session['what']['load']['profile']} pairs={', '.join(slugs[start_at:])}"
+        f"profile={session['what']['load']['profile']} pairs={', '.join(slugs[start_at:stop_at])}"
     )
     failed = False
     try:
-        for pair in pairs[start_at:]:
+        for pair in pairs[start_at:stop_at]:
             slug = pair_slug(pair)
             record = run_pair(session, pair)
             session["results"]["pairs"][slug] = record
@@ -303,7 +311,12 @@ def cmd_run(args: argparse.Namespace) -> int:
                 failed = True
                 if args.fail_fast:
                     raise SessionError(f"pair {slug} failed, stopping")
-        session["status"] = "failed" if failed else "completed"
+        stored = session.get("results", {}).get("pairs") or {}
+        any_failed = failed or any(
+            (stored.get(pair_slug(normalize_pair(p))) or {}).get("status") != "completed"
+            for p in session["what"]["pairs"]
+        )
+        session["status"] = "failed" if any_failed else "completed"
         session["when"]["finished_at"] = utcnow()
         session["results"]["comparison"] = build_comparison(session)
         session["conclusions"] = draft_conclusions(session)
@@ -386,6 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="dispatch pairs: clean start, run, record, wipe")
     run.add_argument("id", nargs="?", help="session id; defaults to the latest planned")
     run.add_argument("--from-pair", help="resume from this pair slug, e.g. python-influxdb")
+    run.add_argument("--only-pair", help="run a single pair slug and keep the rest of the session")
     run.add_argument("--fail-fast", action="store_true")
     run.set_defaults(func=cmd_run)
 

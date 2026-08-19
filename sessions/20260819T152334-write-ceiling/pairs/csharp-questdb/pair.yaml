@@ -1,0 +1,70 @@
+backend: csharp
+storage: questdb
+status: completed
+when:
+  started_at: '2026-08-19T15:59:05Z'
+  finished_at: '2026-08-19T16:02:16Z'
+services:
+- nats
+- questdb
+- csharp-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 4594500
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 25524.6
+meta:
+  backend: csharp
+  storage: questdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: csharp
+  storage: questdb
+  ingest_rate: 25491.42857142857
+  write_error_rate: null
+  write_p95_seconds: 0.09681601366216415
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.09681598570135322
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.09682873332830115
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 4.73%
+    mem: 174.5MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 10.03MiB
+  - name: prism-prometheus-1
+    cpu: 0.31%
+    mem: 32.67MiB
+  - name: prism-questdb-1
+    cpu: 5.25%
+    mem: 518.7MiB
+  api:
+    cpu: 4.73%
+    mem: 174.5MiB
+  storage:
+    cpu: 5.25%
+    mem: 518.7MiB

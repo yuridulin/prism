@@ -1,0 +1,70 @@
+backend: csharp
+storage: influxdb
+status: completed
+when:
+  started_at: '2026-08-19T16:08:59Z'
+  finished_at: '2026-08-19T16:12:09Z'
+services:
+- nats
+- influxdb
+- csharp-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 12906750
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 71703.6
+meta:
+  backend: csharp
+  storage: influxdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: csharp
+  storage: influxdb
+  ingest_rate: 71779.99999999999
+  write_error_rate: null
+  write_p95_seconds: 0.0725037147102525
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.0725037147102525
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.07389822371579437
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 0.02%
+    mem: 74.8MiB
+  - name: prism-influxdb-1
+    cpu: 0.08%
+    mem: 277.2MiB
+  - name: prism-nats-1
+    cpu: 0.05%
+    mem: 6.398MiB
+  - name: prism-prometheus-1
+    cpu: 0.28%
+    mem: 29.64MiB
+  api:
+    cpu: 0.02%
+    mem: 74.8MiB
+  storage:
+    cpu: 0.08%
+    mem: 277.2MiB

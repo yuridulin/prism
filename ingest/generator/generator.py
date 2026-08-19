@@ -110,6 +110,7 @@ async def ingest_worker(profile: Profile, pub: Publisher, stop: asyncio.Event, s
     rng = random.Random()
     while not stop.is_set():
         tick = datetime.now(timezone.utc)
+        started = time.monotonic()
         batch = [make_sample(profile, rng, tick) for _ in range(spec.batch)]
         try:
             await pub.write(batch)
@@ -117,8 +118,11 @@ async def ingest_worker(profile: Profile, pub: Publisher, stop: asyncio.Event, s
         except Exception as exc:
             stats["write_errors"] += 1
             print(f"ingest error: {exc}", flush=True)
+        remaining = interval - (time.monotonic() - started)
+        if remaining <= 0:
+            continue
         try:
-            await asyncio.wait_for(stop.wait(), timeout=interval)
+            await asyncio.wait_for(stop.wait(), timeout=remaining)
         except TimeoutError:
             pass
 

@@ -1,24 +1,40 @@
 using Npgsql;
+using NpgsqlTypes;
 using Prism.Api.Models;
 
 namespace Prism.Api.Store;
 
 public sealed class TimescaleStore : IStore
 {
-    private readonly NpgsqlDataSource _ds;
+    private readonly NpgsqlDataSource? _ds;
+    private readonly string? _initError;
 
     public TimescaleStore(string dsn)
     {
-        var builder = new NpgsqlDataSourceBuilder(dsn);
-        builder.ConnectionStringBuilder.MaxPoolSize = 16;
-        _ds = builder.Build();
+        try
+        {
+            var builder = new NpgsqlDataSourceBuilder(AppConfig.ToNpgsql(dsn));
+            var cs = builder.ConnectionStringBuilder;
+            cs.MaxPoolSize = 16;
+            cs.MinPoolSize = 0;
+            cs.Timeout = 15;
+            cs.CommandTimeout = 60;
+            cs.Pooling = true;
+            cs.NoResetOnClose = true;
+            cs.Enlist = false;
+            _ds = builder.Build();
+        }
+        catch (Exception ex)
+        {
+            _initError = ex.Message;
+        }
     }
 
     public string Name => "timescaledb";
 
     public async Task PingAsync(CancellationToken ct = default)
     {
-        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var conn = await Open(ct);
         await using var cmd = new NpgsqlCommand("SELECT 1", conn);
         await cmd.ExecuteScalarAsync(ct);
     }
@@ -30,24 +46,24 @@ public sealed class TimescaleStore : IStore
             return;
         }
 
-        await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var batch = new NpgsqlBatch(conn);
+        await using var conn = await Open(ct);
+        await using var copy = await conn.BeginBinaryImportAsync(
+            "COPY samples (ts, tag_id, value, quality) FROM STDIN (FORMAT BINARY)", ct);
         foreach (var sample in samples)
         {
-            var cmd = new NpgsqlBatchCommand("INSERT INTO samples (ts, tag_id, value, quality) VALUES ($1, $2, $3, $4)");
-            cmd.Parameters.Add(new NpgsqlParameter { Value = sample.Ts.UtcDateTime });
-            cmd.Parameters.Add(new NpgsqlParameter { Value = unchecked((int)sample.TagId) });
-            cmd.Parameters.Add(new NpgsqlParameter { Value = (float)sample.Value });
-            cmd.Parameters.Add(new NpgsqlParameter { Value = (short)sample.Quality });
-            batch.BatchCommands.Add(cmd);
+            copy.StartRow();
+            copy.Write(sample.Ts.ToUniversalTime(), NpgsqlDbType.TimestampTz);
+            copy.Write(unchecked((int)sample.TagId), NpgsqlDbType.Integer);
+            copy.Write((float)sample.Value, NpgsqlDbType.Real);
+            copy.Write((short)sample.Quality, NpgsqlDbType.Smallint);
         }
 
-        await batch.ExecuteNonQueryAsync(ct);
+        await copy.CompleteAsync(ct);
     }
 
     public async Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default)
     {
-        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var conn = await Open(ct);
         await using var cmd = new NpgsqlCommand(
             """
             SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality
@@ -63,7 +79,7 @@ public sealed class TimescaleStore : IStore
 
     public async Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
     {
-        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var conn = await Open(ct);
         await using var cmd = new NpgsqlCommand(
             """
             SELECT ts, tag_id, value, quality, carried FROM (
@@ -93,7 +109,7 @@ public sealed class TimescaleStore : IStore
             return;
         }
 
-        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var conn = await Open(ct);
         await using var batch = new NpgsqlBatch(conn);
         foreach (var tag in tags)
         {
@@ -113,7 +129,7 @@ public sealed class TimescaleStore : IStore
 
     public async Task<IReadOnlyList<Tag>> ListTagsAsync(CancellationToken ct = default)
     {
-        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var conn = await Open(ct);
         await using var cmd = new NpgsqlCommand("SELECT id, name, COALESCE(unit, '') FROM tags ORDER BY id", conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var output = new List<Tag>();
@@ -130,7 +146,17 @@ public sealed class TimescaleStore : IStore
         return output;
     }
 
-    public ValueTask DisposeAsync() => _ds.DisposeAsync();
+    public ValueTask DisposeAsync() => _ds?.DisposeAsync() ?? ValueTask.CompletedTask;
+
+    private async Task<NpgsqlConnection> Open(CancellationToken ct)
+    {
+        if (_ds is null)
+        {
+            throw new InvalidOperationException(_initError ?? "timescaledb is not configured");
+        }
+
+        return await _ds.OpenConnectionAsync(ct);
+    }
 
     private static async Task<IReadOnlyList<Sample>> ScanSamples(NpgsqlDataReader reader, bool? carried, CancellationToken ct)
     {

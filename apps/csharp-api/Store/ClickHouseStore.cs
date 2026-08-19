@@ -1,3 +1,6 @@
+using System.Buffers.Binary;
+using System.Net.Http.Headers;
+using System.Text;
 using ClickHouse.Client.ADO;
 using ClickHouse.Client.Copy;
 using ClickHouse.Client.Utility;
@@ -7,21 +10,36 @@ namespace Prism.Api.Store;
 
 public sealed class ClickHouseStore : IStore
 {
+    private const string InsertSql =
+        "INSERT INTO samples (ts, tag_id, value, quality) " +
+        "SELECT fromUnixTimestamp64Milli(ts), tag_id, value, quality " +
+        "FROM input('ts Int64, tag_id UInt32, value Float32, quality UInt16') FORMAT RowBinary";
+    private const int RowBytes = 18;
+
     private readonly string _connectionString;
+    private readonly HttpClient _http;
+    private readonly string _insertPath;
 
     public ClickHouseStore(string url, string database)
     {
         _connectionString = ToConnectionString(url, database);
+        var (origin, user, password) = SplitHttp(url);
+        _http = StoreUtil.CreatePooledHttp(TimeSpan.FromSeconds(60), origin);
+        if (!string.IsNullOrEmpty(user))
+        {
+            var token = Convert.ToBase64String(Encoding.ASCII.GetBytes(user + ":" + password));
+            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
+        }
+
+        _insertPath = "/?database=" + Uri.EscapeDataString(database) + "&query=" + Uri.EscapeDataString(InsertSql);
     }
 
     public string Name => "clickhouse";
 
     public async Task PingAsync(CancellationToken ct = default)
     {
-        await using var conn = await Open(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT 1";
-        _ = await cmd.ExecuteScalarAsync(ct);
+        using var resp = await _http.GetAsync("/?query=SELECT%201", ct);
+        await StoreUtil.EnsureSuccess(resp, "clickhouse ping", ct);
     }
 
     public async Task WriteAsync(IReadOnlyList<Sample> samples, CancellationToken ct = default)
@@ -31,21 +49,32 @@ public sealed class ClickHouseStore : IStore
             return;
         }
 
-        await using var conn = await Open(ct);
-        using var bulk = new ClickHouseBulkCopy(conn)
+        var payload = EncodeRowBinary(samples);
+        Exception? last = null;
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            DestinationTableName = "samples",
-            ColumnNames = ["ts", "tag_id", "value", "quality"],
-            BatchSize = samples.Count
-        };
-        await bulk.InitAsync();
-        await bulk.WriteToServerAsync(samples.Select(s => new object[]
-        {
-            s.Ts.UtcDateTime,
-            s.TagId,
-            (float)s.Value,
-            s.Quality
-        }), ct);
+            try
+            {
+                using var content = new ByteArrayContent(payload);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                using var resp = await _http.PostAsync(_insertPath, content, ct);
+                if (attempt == 0 && (int)resp.StatusCode >= 500)
+                {
+                    last = new InvalidOperationException(
+                        $"clickhouse write status {(int)resp.StatusCode}: {await resp.Content.ReadAsStringAsync(ct)}");
+                    continue;
+                }
+
+                await StoreUtil.EnsureSuccess(resp, "clickhouse write", ct);
+                return;
+            }
+            catch (Exception ex) when (attempt == 0 && StoreUtil.IsTransient(ex))
+            {
+                last = ex;
+            }
+        }
+
+        throw last ?? new InvalidOperationException("clickhouse write failed");
     }
 
     public async Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default)
@@ -138,7 +167,11 @@ public sealed class ClickHouseStore : IStore
         return output;
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        _http.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     private async Task<ClickHouseConnection> Open(CancellationToken ct)
     {
@@ -167,6 +200,47 @@ public sealed class ClickHouseStore : IStore
 
     private static DateTimeOffset ToUtc(DateTime dt) =>
         new(DateTime.SpecifyKind(dt.Kind == DateTimeKind.Unspecified ? dt : dt.ToUniversalTime(), DateTimeKind.Utc));
+
+    private static byte[] EncodeRowBinary(IReadOnlyList<Sample> samples)
+    {
+        var payload = new byte[RowBytes * samples.Count];
+        var offset = 0;
+        foreach (var sample in samples)
+        {
+            var span = payload.AsSpan(offset, RowBytes);
+            BinaryPrimitives.WriteInt64LittleEndian(span, sample.Ts.ToUnixTimeMilliseconds());
+            BinaryPrimitives.WriteUInt32LittleEndian(span[8..], sample.TagId);
+            BinaryPrimitives.WriteSingleLittleEndian(span[12..], (float)sample.Value);
+            BinaryPrimitives.WriteUInt16LittleEndian(span[16..], sample.Quality);
+            offset += RowBytes;
+        }
+
+        return payload;
+    }
+
+    private static (string Origin, string User, string Password) SplitHttp(string url)
+    {
+        if (!url.Contains("://", StringComparison.Ordinal))
+        {
+            return ("http://clickhouse:8123/", "prism", "prism");
+        }
+
+        var uri = new Uri(url);
+        var user = "default";
+        var password = "";
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            var parts = uri.UserInfo.Split(':', 2);
+            user = Uri.UnescapeDataString(parts[0]);
+            if (parts.Length > 1)
+            {
+                password = Uri.UnescapeDataString(parts[1]);
+            }
+        }
+
+        var port = uri.IsDefaultPort ? 8123 : uri.Port;
+        return ($"{uri.Scheme}://{uri.Host}:{port}/", user, password);
+    }
 
     internal static string ToConnectionString(string url, string database)
     {

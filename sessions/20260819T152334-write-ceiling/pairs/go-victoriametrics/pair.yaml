@@ -1,0 +1,70 @@
+backend: go
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-19T15:38:46Z'
+  finished_at: '2026-08-19T15:41:56Z'
+services:
+- nats
+- victoriametrics
+- go-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 21633750
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 120184.1
+meta:
+  backend: go
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: go
+  storage: victoriametrics
+  ingest_rate: 117314.11308006538
+  write_error_rate: null
+  write_p95_seconds: 0.004832383255420728
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.004832383255420728
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.008638853028798407
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 16.5MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 5.949MiB
+  - name: prism-prometheus-1
+    cpu: 0.15%
+    mem: 29.97MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.19%
+    mem: 91.7MiB
+  api:
+    cpu: 0.00%
+    mem: 16.5MiB
+  storage:
+    cpu: 0.19%
+    mem: 91.7MiB

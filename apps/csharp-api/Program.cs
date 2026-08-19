@@ -10,7 +10,16 @@ using Prism.Api.Store;
 using Prometheus;
 
 var cfg = AppConfig.Load();
-var store = StoreFactory.Create(cfg);
+IStore store;
+try
+{
+    store = StoreFactory.Create(cfg);
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"storage init deferred ({cfg.Storage}): {ex.Message}");
+    store = new FailedStore(cfg.Storage, ex.Message);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(AppConfig.ToListenUrl(cfg.HttpAddr));

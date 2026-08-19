@@ -10,17 +10,17 @@ public sealed class InfluxStore : IStore
     private readonly HttpClient _http;
     private readonly string _org;
     private readonly string _bucket;
+    private readonly string _writePath;
     private readonly CatalogMem _tags = new();
 
     public InfluxStore(AppConfig cfg)
     {
         _org = cfg.InfluxOrg;
         _bucket = cfg.InfluxBucket;
-        _http = new HttpClient
-        {
-            BaseAddress = new Uri(cfg.InfluxUrl.TrimEnd('/') + "/"),
-            Timeout = TimeSpan.FromSeconds(30)
-        };
+        _writePath = "api/v2/write?org=" + Uri.EscapeDataString(_org)
+                     + "&bucket=" + Uri.EscapeDataString(_bucket)
+                     + "&precision=ns";
+        _http = StoreUtil.CreatePooledHttp(TimeSpan.FromSeconds(30), cfg.InfluxUrl.TrimEnd('/') + "/");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Token", cfg.InfluxToken);
     }
 
@@ -42,16 +42,23 @@ public sealed class InfluxStore : IStore
             return;
         }
 
-        var sb = new StringBuilder();
+        using var buf = new ByteWriter(80 * samples.Count);
         foreach (var sample in samples)
         {
-            sb.Append(CultureInfo.InvariantCulture,
-                $"samples,tag_id={sample.TagId} value={StoreUtil.FormatFloat(sample.Value)},quality={sample.Quality}i {StoreUtil.UnixNano(sample.Ts)}\n");
+            buf.AppendAscii("samples,tag_id=");
+            buf.AppendUInt(sample.TagId);
+            buf.AppendAscii(" value=");
+            buf.AppendIlpFloat(sample.Value);
+            buf.AppendAscii(",quality=");
+            buf.AppendUShort(sample.Quality);
+            buf.AppendAscii("i ");
+            buf.AppendLong(StoreUtil.UnixNano(sample.Ts));
+            buf.AppendByte((byte)'\n');
         }
 
-        var url = $"api/v2/write?org={Uri.EscapeDataString(_org)}&bucket={Uri.EscapeDataString(_bucket)}&precision=ns";
-        using var content = new StringContent(sb.ToString(), Encoding.UTF8, "text/plain");
-        using var resp = await _http.PostAsync(url, content, ct);
+        using var content = new ByteArrayContent(buf.Buffer, 0, buf.Length);
+        content.Headers.ContentType = new MediaTypeHeaderValue("text/plain") { CharSet = "utf-8" };
+        using var resp = await _http.PostAsync(_writePath, content, ct);
         await StoreUtil.EnsureSuccess(resp, "influxdb write", ct);
     }
 

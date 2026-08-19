@@ -1,6 +1,7 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
-using System.Text;
+using System.Net.Sockets;
 using System.Text.Json;
 using Prism.Api.Models;
 
@@ -10,11 +11,14 @@ public sealed class QuestDbStore : IStore
 {
     private readonly string _base;
     private readonly HttpClient _http;
+    private readonly IlpPool _ilp;
 
-    public QuestDbStore(string url)
+    public QuestDbStore(string url, string ilp)
     {
         _base = url.TrimEnd('/');
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        _http = StoreUtil.CreatePooledHttp(TimeSpan.FromSeconds(30), _base);
+        var (host, port) = StoreUtil.ParseHostPort(ilp, 9009);
+        _ilp = new IlpPool(host, port);
     }
 
     public string Name => "questdb";
@@ -28,19 +32,21 @@ public sealed class QuestDbStore : IStore
             return;
         }
 
-        var sb = new StringBuilder();
+        using var buf = new ByteWriter(80 * samples.Count);
         foreach (var sample in samples)
         {
-            sb.Append(CultureInfo.InvariantCulture,
-                $"samples tag_id={sample.TagId}i,value={StoreUtil.FormatFloat(sample.Value)},quality={sample.Quality}i {StoreUtil.UnixNano(sample.Ts)}\n");
+            buf.AppendAscii("samples tag_id=");
+            buf.AppendUInt(sample.TagId);
+            buf.AppendAscii("i,value=");
+            buf.AppendIlpFloat(sample.Value);
+            buf.AppendAscii(",quality=");
+            buf.AppendUShort(sample.Quality);
+            buf.AppendAscii("i ");
+            buf.AppendLong(StoreUtil.UnixNano(sample.Ts));
+            buf.AppendByte((byte)'\n');
         }
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, _base + "/write?precision=n")
-        {
-            Content = new StringContent(sb.ToString(), Encoding.UTF8, "text/plain")
-        };
-        using var resp = await _http.SendAsync(req, ct);
-        await StoreUtil.EnsureSuccess(resp, "questdb write", ct);
+        await _ilp.WriteAsync(buf.Written, ct);
     }
 
     public async Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default)
@@ -106,6 +112,7 @@ public sealed class QuestDbStore : IStore
     public ValueTask DisposeAsync()
     {
         _http.Dispose();
+        _ilp.Dispose();
         return ValueTask.CompletedTask;
     }
 
@@ -211,5 +218,83 @@ public sealed class QuestDbStore : IStore
         public string? Query { get; set; }
         public List<List<object?>> Dataset { get; set; } = [];
         public string? Error { get; set; }
+    }
+
+    private sealed class IlpPool : IDisposable
+    {
+        private readonly string _host;
+        private readonly int _port;
+        private readonly ConcurrentBag<TcpClient> _idle = [];
+
+        public IlpPool(string host, int port)
+        {
+            _host = host;
+            _port = port;
+        }
+
+        public async Task WriteAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+        {
+            Exception? last = null;
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                TcpClient? client = null;
+                try
+                {
+                    client = await RentAsync(ct);
+                    var stream = client.GetStream();
+                    await stream.WriteAsync(payload, ct);
+                    await stream.FlushAsync(ct);
+                    Return(client);
+                    return;
+                }
+                catch (Exception ex) when (attempt == 0)
+                {
+                    last = ex;
+                    client?.Dispose();
+                }
+            }
+
+            throw last ?? new InvalidOperationException("questdb ilp write failed");
+        }
+
+        public void Dispose()
+        {
+            while (_idle.TryTake(out var client))
+            {
+                client.Dispose();
+            }
+        }
+
+        private async Task<TcpClient> RentAsync(CancellationToken ct)
+        {
+            while (_idle.TryTake(out var client))
+            {
+                if (client.Connected)
+                {
+                    return client;
+                }
+
+                client.Dispose();
+            }
+
+            var created = new TcpClient
+            {
+                NoDelay = true,
+                SendBufferSize = 256 * 1024
+            };
+            await created.ConnectAsync(_host, _port, ct);
+            return created;
+        }
+
+        private void Return(TcpClient client)
+        {
+            if (client.Connected)
+            {
+                _idle.Add(client);
+                return;
+            }
+
+            client.Dispose();
+        }
     }
 }

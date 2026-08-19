@@ -1,0 +1,1963 @@
+id: 20260819T152334-write-ceiling
+status: completed
+when:
+  created_at: '2026-08-19T15:23:34Z'
+  started_at: '2026-08-19T15:23:54Z'
+  finished_at: '2026-08-19T16:36:39Z'
+why: 'Потолок записи: все API x все БД, HTTP backpressure выше конверта'
+what:
+  duration: 3m
+  duration_seconds: 180
+  load:
+    profile: write-ceiling
+    transport: http
+  pairs:
+  - backend: go
+    storage: questdb
+  - backend: go
+    storage: clickhouse
+  - backend: go
+    storage: timescaledb
+  - backend: go
+    storage: influxdb
+  - backend: go
+    storage: victoriametrics
+  - backend: python
+    storage: questdb
+  - backend: python
+    storage: clickhouse
+  - backend: python
+    storage: timescaledb
+  - backend: python
+    storage: influxdb
+  - backend: python
+    storage: victoriametrics
+  - backend: csharp
+    storage: questdb
+  - backend: csharp
+    storage: clickhouse
+  - backend: csharp
+    storage: timescaledb
+  - backend: csharp
+    storage: influxdb
+  - backend: csharp
+    storage: victoriametrics
+  - backend: rust
+    storage: questdb
+  - backend: rust
+    storage: clickhouse
+  - backend: rust
+    storage: timescaledb
+  - backend: rust
+    storage: influxdb
+  - backend: rust
+    storage: victoriametrics
+  resources: &id001
+    api:
+      cpus: '1.0'
+      memory: 512M
+    storage:
+      cpus: '1.0'
+      memory: 1G
+    bus:
+      cpus: '0.50'
+      memory: 256M
+    observe:
+      cpus: '0.50'
+      memory: 512M
+    generator:
+      cpus: '2.0'
+      memory: 1G
+results:
+  pairs:
+    go-questdb:
+      backend: go
+      storage: questdb
+      status: completed
+      when:
+        started_at: '2026-08-19T15:25:01Z'
+        finished_at: '2026-08-19T15:28:13Z'
+      services:
+      - nats
+      - questdb
+      - go-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 4523000
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 25126.1
+      meta:
+        backend: go
+        storage: questdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: go
+        storage: questdb
+        ingest_rate: 25195.714285714283
+        write_error_rate: null
+        write_p95_seconds: 0.09690114985870878
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.09690112719504167
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.09691521720765434
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-go-api-1
+          cpu: 0.32%
+          mem: 46.52MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 25.08MiB
+        - name: prism-prometheus-1
+          cpu: 0.17%
+          mem: 131.7MiB
+        - name: prism-questdb-1
+          cpu: 10.18%
+          mem: 708.7MiB
+        api:
+          cpu: 0.32%
+          mem: 46.52MiB
+        storage:
+          cpu: 10.18%
+          mem: 708.7MiB
+    go-clickhouse:
+      backend: go
+      storage: clickhouse
+      status: completed
+      when:
+        started_at: '2026-08-19T15:28:18Z'
+        finished_at: '2026-08-19T15:31:30Z'
+      services:
+      - nats
+      - clickhouse
+      - go-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 6454000
+        queries: 0
+        write_errors: 9
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 35855.1
+      meta:
+        backend: go
+        storage: clickhouse
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: go
+        storage: clickhouse
+        ingest_rate: 35962.85714285714
+        write_error_rate: 0.005949777777777779
+        write_p95_seconds: 0.09929230044420516
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.09929230044420516
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.09941472967766793
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-go-api-1
+          cpu: 0.17%
+          mem: 24.81MiB
+        - name: prism-clickhouse-1
+          cpu: 23.92%
+          mem: 779.2MiB
+        - name: prism-nats-1
+          cpu: 0.05%
+          mem: 7.895MiB
+        - name: prism-prometheus-1
+          cpu: 0.39%
+          mem: 50.5MiB
+        api:
+          cpu: 0.17%
+          mem: 24.81MiB
+        storage:
+          cpu: 23.92%
+          mem: 779.2MiB
+    go-timescaledb:
+      backend: go
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-19T15:31:46Z'
+        finished_at: '2026-08-19T15:35:04Z'
+      services:
+      - nats
+      - timescaledb
+      - go-api
+      - prometheus
+      - postgres-exporter
+      generator:
+        profile: write-ceiling
+        written: 1106000
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 6144.4
+      meta:
+        backend: go
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: go
+        storage: timescaledb
+        ingest_rate: 6141.428571428571
+        write_error_rate: null
+        write_p95_seconds: 0.49201333861595353
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.49201333861595353
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.4920793713681986
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 13MiB
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 17.85MiB
+        - name: prism-timescaledb-1
+          cpu: 0.03%
+          mem: 238.3MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 6.281MiB
+        - name: prism-prometheus-1
+          cpu: 0.16%
+          mem: 33.99MiB
+        api:
+          cpu: 0.00%
+          mem: 17.85MiB
+        storage:
+          cpu: 0.03%
+          mem: 238.3MiB
+    go-influxdb:
+      backend: go
+      storage: influxdb
+      status: completed
+      when:
+        started_at: '2026-08-19T15:35:08Z'
+        finished_at: '2026-08-19T15:38:43Z'
+      services:
+      - nats
+      - influxdb
+      - go-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 13788000
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 76597.9
+      meta:
+        backend: go
+        storage: influxdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: go
+        storage: influxdb
+        ingest_rate: 76688.57142857142
+        write_error_rate: null
+        write_p95_seconds: 0.06800045808520377
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.06800045808520377
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.06926464014304878
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 18.83MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 6.215MiB
+        - name: prism-influxdb-1
+          cpu: 61.73%
+          mem: 211.7MiB
+        - name: prism-prometheus-1
+          cpu: 0.15%
+          mem: 31.42MiB
+        api:
+          cpu: 0.00%
+          mem: 18.83MiB
+        storage:
+          cpu: 61.73%
+          mem: 211.7MiB
+    go-victoriametrics:
+      backend: go
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-19T15:38:46Z'
+        finished_at: '2026-08-19T15:41:56Z'
+      services:
+      - nats
+      - victoriametrics
+      - go-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 21633750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 120184.1
+      meta:
+        backend: go
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: go
+        storage: victoriametrics
+        ingest_rate: 117314.11308006538
+        write_error_rate: null
+        write_p95_seconds: 0.004832383255420728
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.004832383255420728
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.008638853028798407
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 16.5MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 5.949MiB
+        - name: prism-prometheus-1
+          cpu: 0.15%
+          mem: 29.97MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.19%
+          mem: 91.7MiB
+        api:
+          cpu: 0.00%
+          mem: 16.5MiB
+        storage:
+          cpu: 0.19%
+          mem: 91.7MiB
+    python-questdb:
+      backend: python
+      storage: questdb
+      status: completed
+      when:
+        started_at: '2026-08-19T15:42:01Z'
+        finished_at: '2026-08-19T15:45:46Z'
+      services:
+      - nats
+      - questdb
+      - python-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 2104500
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 11691.5
+      meta:
+        backend: python
+        storage: questdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: python
+        storage: questdb
+        ingest_rate: 11688.571428571428
+        write_error_rate: null
+        write_p95_seconds: 0.09310467479674797
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.09309531886024425
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.2362935716204161
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-python-api-1
+          cpu: 0.13%
+          mem: 60.33MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 6.461MiB
+        - name: prism-prometheus-1
+          cpu: 0.32%
+          mem: 28.36MiB
+        - name: prism-questdb-1
+          cpu: 8.10%
+          mem: 399MiB
+        api:
+          cpu: 0.13%
+          mem: 60.33MiB
+        storage:
+          cpu: 8.10%
+          mem: 399MiB
+    python-clickhouse:
+      backend: python
+      storage: clickhouse
+      status: completed
+      when:
+        started_at: '2026-08-19T15:45:50Z'
+        finished_at: '2026-08-19T15:49:03Z'
+      services:
+      - nats
+      - clickhouse
+      - python-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 4551750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 25287.1
+      meta:
+        backend: python
+        storage: clickhouse
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: python
+        storage: clickhouse
+        ingest_rate: 25099.999999999996
+        write_error_rate: null
+        write_p95_seconds: 0.023327338129496344
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.023323317307692246
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.07353761885076478
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-python-api-1
+          cpu: 2.07%
+          mem: 61.88MiB
+        - name: prism-clickhouse-1
+          cpu: 10.44%
+          mem: 918.6MiB
+        - name: prism-prometheus-1
+          cpu: 0.18%
+          mem: 49.2MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 8.227MiB
+        api:
+          cpu: 2.07%
+          mem: 61.88MiB
+        storage:
+          cpu: 10.44%
+          mem: 918.6MiB
+    python-timescaledb:
+      backend: python
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-19T15:49:17Z'
+        finished_at: '2026-08-19T15:52:35Z'
+      services:
+      - nats
+      - timescaledb
+      - python-api
+      - prometheus
+      - postgres-exporter
+      generator:
+        profile: write-ceiling
+        written: 1131750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 6287.4
+      meta:
+        backend: python
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: python
+        storage: timescaledb
+        ingest_rate: 6211.428571428571
+        write_error_rate: null
+        write_p95_seconds: 0.4893314181248368
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.4893314181248368
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.489446321809202
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-python-api-1
+          cpu: 0.14%
+          mem: 61.66MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 32.33MiB
+        - name: prism-timescaledb-1
+          cpu: 0.03%
+          mem: 237.3MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 6.457MiB
+        - name: prism-prometheus-1
+          cpu: 0.17%
+          mem: 56.01MiB
+        api:
+          cpu: 0.14%
+          mem: 61.66MiB
+        storage:
+          cpu: 0.03%
+          mem: 237.3MiB
+    python-influxdb:
+      backend: python
+      storage: influxdb
+      status: completed
+      when:
+        started_at: '2026-08-19T15:52:38Z'
+        finished_at: '2026-08-19T15:55:48Z'
+      services:
+      - nats
+      - influxdb
+      - python-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 5317750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 29542.8
+      meta:
+        backend: python
+        storage: influxdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: python
+        storage: influxdb
+        ingest_rate: 29534.28571428571
+        write_error_rate: null
+        write_p95_seconds: 0.009839551619153057
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.009836524505972982
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.06492194092827001
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-python-api-1
+          cpu: 0.14%
+          mem: 61.08MiB
+        - name: prism-prometheus-1
+          cpu: 0.21%
+          mem: 32.48MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 8.547MiB
+        - name: prism-influxdb-1
+          cpu: 0.09%
+          mem: 339.6MiB
+        api:
+          cpu: 0.14%
+          mem: 61.08MiB
+        storage:
+          cpu: 0.09%
+          mem: 339.6MiB
+    python-victoriametrics:
+      backend: python
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-19T15:55:52Z'
+        finished_at: '2026-08-19T15:59:01Z'
+      services:
+      - nats
+      - victoriametrics
+      - python-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 14982750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 83236.1
+      meta:
+        backend: python
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: python
+        storage: victoriametrics
+        ingest_rate: 83308.57142857142
+        write_error_rate: null
+        write_p95_seconds: 0.004763969386877633
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.004763887455714924
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.02454175009344092
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-python-api-1
+          cpu: 0.16%
+          mem: 60.45MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 6.191MiB
+        - name: prism-prometheus-1
+          cpu: 0.11%
+          mem: 30.25MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.13%
+          mem: 114.3MiB
+        api:
+          cpu: 0.16%
+          mem: 60.45MiB
+        storage:
+          cpu: 0.13%
+          mem: 114.3MiB
+    csharp-questdb:
+      backend: csharp
+      storage: questdb
+      status: completed
+      when:
+        started_at: '2026-08-19T15:59:05Z'
+        finished_at: '2026-08-19T16:02:16Z'
+      services:
+      - nats
+      - questdb
+      - csharp-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 4594500
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 25524.6
+      meta:
+        backend: csharp
+        storage: questdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: questdb
+        ingest_rate: 25491.42857142857
+        write_error_rate: null
+        write_p95_seconds: 0.09681601366216415
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.09681598570135322
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.09682873332830115
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 4.73%
+          mem: 174.5MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 10.03MiB
+        - name: prism-prometheus-1
+          cpu: 0.31%
+          mem: 32.67MiB
+        - name: prism-questdb-1
+          cpu: 5.25%
+          mem: 518.7MiB
+        api:
+          cpu: 4.73%
+          mem: 174.5MiB
+        storage:
+          cpu: 5.25%
+          mem: 518.7MiB
+    csharp-clickhouse:
+      backend: csharp
+      storage: clickhouse
+      status: completed
+      when:
+        started_at: '2026-08-19T16:02:20Z'
+        finished_at: '2026-08-19T16:05:35Z'
+      services:
+      - nats
+      - clickhouse
+      - csharp-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 3797250
+        queries: 0
+        write_errors: 1
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 21095.2
+      meta:
+        backend: csharp
+        storage: clickhouse
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: clickhouse
+        ingest_rate: 20852.85714285714
+        write_error_rate: 0.02868293650793651
+        write_p95_seconds: 0.1553227272727272
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.1553227272727272
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.1631333892617447
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 2.91%
+          mem: 91.23MiB
+        - name: prism-clickhouse-1
+          cpu: 4.69%
+          mem: 841.1MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 6.02MiB
+        - name: prism-prometheus-1
+          cpu: 0.19%
+          mem: 41.95MiB
+        api:
+          cpu: 2.91%
+          mem: 91.23MiB
+        storage:
+          cpu: 4.69%
+          mem: 841.1MiB
+    csharp-timescaledb:
+      backend: csharp
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-19T16:33:09Z'
+        finished_at: '2026-08-19T16:36:36Z'
+      services:
+      - nats
+      - timescaledb
+      - csharp-api
+      - prometheus
+      - postgres-exporter
+      generator:
+        profile: write-ceiling
+        written: 654500
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 3636.1
+      meta:
+        backend: csharp
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: timescaledb
+        ingest_rate: 3642.857142857142
+        write_error_rate: null
+        write_p95_seconds: 0.9540668119099491
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.954033430232558
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.955738278516445
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 0.03%
+          mem: 87.97MiB
+        - name: prism-postgres-exporter-1
+          cpu: 1.73%
+          mem: 13.49MiB
+        - name: prism-timescaledb-1
+          cpu: 0.04%
+          mem: 138.2MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 6.496MiB
+        - name: prism-prometheus-1
+          cpu: 0.28%
+          mem: 36.95MiB
+        api:
+          cpu: 0.03%
+          mem: 87.97MiB
+        storage:
+          cpu: 0.04%
+          mem: 138.2MiB
+    csharp-influxdb:
+      backend: csharp
+      storage: influxdb
+      status: completed
+      when:
+        started_at: '2026-08-19T16:08:59Z'
+        finished_at: '2026-08-19T16:12:09Z'
+      services:
+      - nats
+      - influxdb
+      - csharp-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 12906750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 71703.6
+      meta:
+        backend: csharp
+        storage: influxdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: influxdb
+        ingest_rate: 71779.99999999999
+        write_error_rate: null
+        write_p95_seconds: 0.0725037147102525
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.0725037147102525
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.07389822371579437
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 0.02%
+          mem: 74.8MiB
+        - name: prism-influxdb-1
+          cpu: 0.08%
+          mem: 277.2MiB
+        - name: prism-nats-1
+          cpu: 0.05%
+          mem: 6.398MiB
+        - name: prism-prometheus-1
+          cpu: 0.28%
+          mem: 29.64MiB
+        api:
+          cpu: 0.02%
+          mem: 74.8MiB
+        storage:
+          cpu: 0.08%
+          mem: 277.2MiB
+    csharp-victoriametrics:
+      backend: csharp
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-19T16:12:11Z'
+        finished_at: '2026-08-19T16:15:20Z'
+      services:
+      - nats
+      - victoriametrics
+      - csharp-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 20423750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 113463.3
+      meta:
+        backend: csharp
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: victoriametrics
+        ingest_rate: 113837.82722222223
+        write_error_rate: null
+        write_p95_seconds: 0.004875192778489747
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.004874943789272735
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.009221986955858985
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 1.68%
+          mem: 69.64MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 8.137MiB
+        - name: prism-prometheus-1
+          cpu: 0.37%
+          mem: 32.32MiB
+        - name: prism-victoriametrics-1
+          cpu: 3.64%
+          mem: 90.23MiB
+        api:
+          cpu: 1.68%
+          mem: 69.64MiB
+        storage:
+          cpu: 3.64%
+          mem: 90.23MiB
+    rust-questdb:
+      backend: rust
+      storage: questdb
+      status: completed
+      when:
+        started_at: '2026-08-19T16:15:25Z'
+        finished_at: '2026-08-19T16:18:37Z'
+      services:
+      - nats
+      - questdb
+      - rust-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 4597250
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 25538.6
+      meta:
+        backend: rust
+        storage: questdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: rust
+        storage: questdb
+        ingest_rate: 25639.999999999996
+        write_error_rate: null
+        write_p95_seconds: 0.09679400304844502
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.09679391228712042
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.09679637242353661
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 17.74MiB
+        - name: prism-nats-1
+          cpu: 0.04%
+          mem: 8.57MiB
+        - name: prism-prometheus-1
+          cpu: 0.02%
+          mem: 29.38MiB
+        - name: prism-questdb-1
+          cpu: 11.33%
+          mem: 457.6MiB
+        api:
+          cpu: 0.00%
+          mem: 17.74MiB
+        storage:
+          cpu: 11.33%
+          mem: 457.6MiB
+    rust-clickhouse:
+      backend: rust
+      storage: clickhouse
+      status: completed
+      when:
+        started_at: '2026-08-19T16:18:40Z'
+        finished_at: '2026-08-19T16:21:53Z'
+      services:
+      - nats
+      - clickhouse
+      - rust-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 6934000
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 38520.6
+      meta:
+        backend: rust
+        storage: clickhouse
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: rust
+        storage: clickhouse
+        ingest_rate: 38098.57142857142
+        write_error_rate: null
+        write_p95_seconds: 0.09582185458676515
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.09582126118449086
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.09601068965517243
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 15.39MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 6.258MiB
+        - name: prism-clickhouse-1
+          cpu: 5.90%
+          mem: 836.7MiB
+        - name: prism-prometheus-1
+          cpu: 0.24%
+          mem: 55.5MiB
+        api:
+          cpu: 0.00%
+          mem: 15.39MiB
+        storage:
+          cpu: 5.90%
+          mem: 836.7MiB
+    rust-timescaledb:
+      backend: rust
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-19T16:22:09Z'
+        finished_at: '2026-08-19T16:25:21Z'
+      services:
+      - nats
+      - timescaledb
+      - rust-api
+      - prometheus
+      - postgres-exporter
+      generator:
+        profile: write-ceiling
+        written: 811500
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 4508.3
+      meta:
+        backend: rust
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: rust
+        storage: timescaledb
+        ingest_rate: 4505.714285714285
+        write_error_rate: null
+        write_p95_seconds: 0.5956410256410251
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.5956410256410251
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.6298122065727696
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 0.03%
+          mem: 4.629MiB
+        - name: prism-postgres-exporter-1
+          cpu: 1.45%
+          mem: 29.11MiB
+        - name: prism-timescaledb-1
+          cpu: 3.84%
+          mem: 226.1MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 9.801MiB
+        - name: prism-prometheus-1
+          cpu: 0.37%
+          mem: 50.64MiB
+        api:
+          cpu: 0.03%
+          mem: 4.629MiB
+        storage:
+          cpu: 3.84%
+          mem: 226.1MiB
+    rust-influxdb:
+      backend: rust
+      storage: influxdb
+      status: completed
+      when:
+        started_at: '2026-08-19T16:25:26Z'
+        finished_at: '2026-08-19T16:28:36Z'
+      services:
+      - nats
+      - influxdb
+      - rust-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 14183750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 78796.9
+      meta:
+        backend: rust
+        storage: influxdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: rust
+        storage: influxdb
+        ingest_rate: 79457.14285714284
+        write_error_rate: null
+        write_p95_seconds: 0.06527135044173306
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.06527135044173306
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.06648261758691186
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 0.03%
+          mem: 3.609MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 7.699MiB
+        - name: prism-prometheus-1
+          cpu: 0.33%
+          mem: 32.19MiB
+        - name: prism-influxdb-1
+          cpu: 0.04%
+          mem: 329.8MiB
+        api:
+          cpu: 0.03%
+          mem: 3.609MiB
+        storage:
+          cpu: 0.04%
+          mem: 329.8MiB
+    rust-victoriametrics:
+      backend: rust
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-19T16:28:40Z'
+        finished_at: '2026-08-19T16:31:50Z'
+      services:
+      - nats
+      - victoriametrics
+      - rust-api
+      - prometheus
+      generator:
+        profile: write-ceiling
+        written: 21726750
+        queries: 0
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 120701.9
+      meta:
+        backend: rust
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.1
+        ops:
+        - write
+        - locf
+        - range
+        - sample
+        - twavg
+        - tags
+      prometheus:
+      - backend: rust
+        storage: victoriametrics
+        ingest_rate: 120664.2857142857
+        write_error_rate: null
+        write_p95_seconds: 0.00482622306961302
+        locf_p95_seconds: null
+        range_p95_seconds: null
+        storage_write_p95_seconds: 0.00482622306961302
+        storage_locf_p95_seconds: null
+        storage_range_p95_seconds: null
+        api_p95_seconds: 0.004924438157426387
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 3.742MiB
+        - name: prism-nats-1
+          cpu: 0.04%
+          mem: 8.91MiB
+        - name: prism-prometheus-1
+          cpu: 0.24%
+          mem: 33.77MiB
+        - name: prism-victoriametrics-1
+          cpu: 1.70%
+          mem: 107.2MiB
+        api:
+          cpu: 0.00%
+          mem: 3.742MiB
+        storage:
+          cpu: 1.70%
+          mem: 107.2MiB
+  comparison:
+    profile: write-ceiling
+    duration: 3m
+    envelope: *id001
+    how: Одинаковый resource envelope и чистый старт на каждую пару. Эффективнее та,
+      что держит предложенный ingest без ошибок и отвечает быстрее на locf/range.
+      storage_*_p95 показывает, где сидит задержка — в БД или в API.
+    primary: write
+    rows:
+    - pair: go-questdb
+      status: completed
+      ingest_rate: 25126.1
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 96.901
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 96.901
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 96.915
+      cpu_api: 0.32%
+      mem_api: 46.52MiB
+      cpu_storage: 10.18%
+      mem_storage: 708.7MiB
+    - pair: go-clickhouse
+      status: completed
+      ingest_rate: 35855.1
+      write_errors: 9
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 99.292
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 99.292
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 99.415
+      cpu_api: 0.17%
+      mem_api: 24.81MiB
+      cpu_storage: 23.92%
+      mem_storage: 779.2MiB
+    - pair: go-timescaledb
+      status: completed
+      ingest_rate: 6144.4
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 492.013
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 492.013
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 492.079
+      cpu_api: 0.00%
+      mem_api: 17.85MiB
+      cpu_storage: 0.03%
+      mem_storage: 238.3MiB
+    - pair: go-influxdb
+      status: completed
+      ingest_rate: 76597.9
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 68.0
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 68.0
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 69.265
+      cpu_api: 0.00%
+      mem_api: 18.83MiB
+      cpu_storage: 61.73%
+      mem_storage: 211.7MiB
+    - pair: go-victoriametrics
+      status: completed
+      ingest_rate: 120184.1
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 4.832
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 4.832
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 8.639
+      cpu_api: 0.00%
+      mem_api: 16.5MiB
+      cpu_storage: 0.19%
+      mem_storage: 91.7MiB
+    - pair: python-questdb
+      status: completed
+      ingest_rate: 11691.5
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 93.105
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 93.095
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 236.294
+      cpu_api: 0.13%
+      mem_api: 60.33MiB
+      cpu_storage: 8.10%
+      mem_storage: 399MiB
+    - pair: python-clickhouse
+      status: completed
+      ingest_rate: 25287.1
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 23.327
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 23.323
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 73.538
+      cpu_api: 2.07%
+      mem_api: 61.88MiB
+      cpu_storage: 10.44%
+      mem_storage: 918.6MiB
+    - pair: python-timescaledb
+      status: completed
+      ingest_rate: 6287.4
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 489.331
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 489.331
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 489.446
+      cpu_api: 0.14%
+      mem_api: 61.66MiB
+      cpu_storage: 0.03%
+      mem_storage: 237.3MiB
+    - pair: python-influxdb
+      status: completed
+      ingest_rate: 29542.8
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 9.84
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 9.837
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 64.922
+      cpu_api: 0.14%
+      mem_api: 61.08MiB
+      cpu_storage: 0.09%
+      mem_storage: 339.6MiB
+    - pair: python-victoriametrics
+      status: completed
+      ingest_rate: 83236.1
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 4.764
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 4.764
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 24.542
+      cpu_api: 0.16%
+      mem_api: 60.45MiB
+      cpu_storage: 0.13%
+      mem_storage: 114.3MiB
+    - pair: csharp-questdb
+      status: completed
+      ingest_rate: 25524.6
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 96.816
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 96.816
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 96.829
+      cpu_api: 4.73%
+      mem_api: 174.5MiB
+      cpu_storage: 5.25%
+      mem_storage: 518.7MiB
+    - pair: csharp-clickhouse
+      status: completed
+      ingest_rate: 21095.2
+      write_errors: 1
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 155.323
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 155.323
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 163.133
+      cpu_api: 2.91%
+      mem_api: 91.23MiB
+      cpu_storage: 4.69%
+      mem_storage: 841.1MiB
+    - pair: csharp-timescaledb
+      status: completed
+      ingest_rate: 3636.1
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 954.067
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 954.033
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 955.738
+      cpu_api: 0.03%
+      mem_api: 87.97MiB
+      cpu_storage: 0.04%
+      mem_storage: 138.2MiB
+    - pair: csharp-influxdb
+      status: completed
+      ingest_rate: 71703.6
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 72.504
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 72.504
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 73.898
+      cpu_api: 0.02%
+      mem_api: 74.8MiB
+      cpu_storage: 0.08%
+      mem_storage: 277.2MiB
+    - pair: csharp-victoriametrics
+      status: completed
+      ingest_rate: 113463.3
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 4.875
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 4.875
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 9.222
+      cpu_api: 1.68%
+      mem_api: 69.64MiB
+      cpu_storage: 3.64%
+      mem_storage: 90.23MiB
+    - pair: rust-questdb
+      status: completed
+      ingest_rate: 25538.6
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 96.794
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 96.794
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 96.796
+      cpu_api: 0.00%
+      mem_api: 17.74MiB
+      cpu_storage: 11.33%
+      mem_storage: 457.6MiB
+    - pair: rust-clickhouse
+      status: completed
+      ingest_rate: 38520.6
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 95.822
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 95.821
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 96.011
+      cpu_api: 0.00%
+      mem_api: 15.39MiB
+      cpu_storage: 5.90%
+      mem_storage: 836.7MiB
+    - pair: rust-timescaledb
+      status: completed
+      ingest_rate: 4508.3
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 595.641
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 595.641
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 629.812
+      cpu_api: 0.03%
+      mem_api: 4.629MiB
+      cpu_storage: 3.84%
+      mem_storage: 226.1MiB
+    - pair: rust-influxdb
+      status: completed
+      ingest_rate: 78796.9
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 65.271
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 65.271
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 66.483
+      cpu_api: 0.03%
+      mem_api: 3.609MiB
+      cpu_storage: 0.04%
+      mem_storage: 329.8MiB
+    - pair: rust-victoriametrics
+      status: completed
+      ingest_rate: 120701.9
+      write_errors: 0
+      query_errors: 0
+      queries: 0
+      write_p95_ms: 4.826
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: 4.826
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: 4.924
+      cpu_api: 0.00%
+      mem_api: 3.742MiB
+      cpu_storage: 1.70%
+      mem_storage: 107.2MiB
+    ranks:
+      ingest_rate:
+      - rust-victoriametrics
+      - go-victoriametrics
+      - csharp-victoriametrics
+      - python-victoriametrics
+      - rust-influxdb
+      - go-influxdb
+      - csharp-influxdb
+      - rust-clickhouse
+      - go-clickhouse
+      - python-influxdb
+      - rust-questdb
+      - csharp-questdb
+      - python-clickhouse
+      - go-questdb
+      - csharp-clickhouse
+      - python-questdb
+      - python-timescaledb
+      - go-timescaledb
+      - rust-timescaledb
+      - csharp-timescaledb
+      write_p95_ms:
+      - python-victoriametrics
+      - rust-victoriametrics
+      - go-victoriametrics
+      - csharp-victoriametrics
+      - python-influxdb
+      - python-clickhouse
+      - rust-influxdb
+      - go-influxdb
+      - csharp-influxdb
+      - python-questdb
+      - rust-clickhouse
+      - rust-questdb
+      - csharp-questdb
+      - go-questdb
+      - go-clickhouse
+      - csharp-clickhouse
+      - python-timescaledb
+      - go-timescaledb
+      - rust-timescaledb
+      - csharp-timescaledb
+      locf_p95_ms: []
+      range_p95_ms: []
+conclusions: 'Черновик по цифрам. Заменить человеческим выводом.
+
+
+  Сравнение пар: профиль write-ceiling за 3m.
+
+  Одинаковый resource envelope и чистый старт на каждую пару. Эффективнее та, что
+  держит предложенный ingest без ошибок и отвечает быстрее на locf/range. storage_*_p95
+  показывает, где сидит задержка — в БД или в API.
+
+
+  pair                     status       ingest/s  w_err  q_err    w p95     locf    range  cpu
+  api   cpu db
+
+  go-questdb               completed     25126.1      0      0     96.9      n/a      n/a    0.32%   10.18%
+
+  go-clickhouse            completed     35855.1      9      0     99.3      n/a      n/a    0.17%   23.92%
+
+  go-timescaledb           completed      6144.4      0      0    492.0      n/a      n/a    0.00%    0.03%
+
+  go-influxdb              completed     76597.9      0      0     68.0      n/a      n/a    0.00%   61.73%
+
+  go-victoriametrics       completed    120184.1      0      0      4.8      n/a      n/a    0.00%    0.19%
+
+  python-questdb           completed     11691.5      0      0     93.1      n/a      n/a    0.13%    8.10%
+
+  python-clickhouse        completed     25287.1      0      0     23.3      n/a      n/a    2.07%   10.44%
+
+  python-timescaledb       completed      6287.4      0      0    489.3      n/a      n/a    0.14%    0.03%
+
+  python-influxdb          completed     29542.8      0      0      9.8      n/a      n/a    0.14%    0.09%
+
+  python-victoriametrics   completed     83236.1      0      0      4.8      n/a      n/a    0.16%    0.13%
+
+  csharp-questdb           completed     25524.6      0      0     96.8      n/a      n/a    4.73%    5.25%
+
+  csharp-clickhouse        completed     21095.2      1      0    155.3      n/a      n/a    2.91%    4.69%
+
+  csharp-timescaledb       completed      3636.1      0      0    954.1      n/a      n/a    0.03%    0.04%
+
+  csharp-influxdb          completed     71703.6      0      0     72.5      n/a      n/a    0.02%    0.08%
+
+  csharp-victoriametrics   completed    113463.3      0      0      4.9      n/a      n/a    1.68%    3.64%
+
+  rust-questdb             completed     25538.6      0      0     96.8      n/a      n/a    0.00%   11.33%
+
+  rust-clickhouse          completed     38520.6      0      0     95.8      n/a      n/a    0.00%    5.90%
+
+  rust-timescaledb         completed      4508.3      0      0    595.6      n/a      n/a    0.03%    3.84%
+
+  rust-influxdb            completed     78796.9      0      0     65.3      n/a      n/a    0.03%    0.04%
+
+  rust-victoriametrics     completed    120701.9      0      0      4.8      n/a      n/a    0.00%    1.70%
+
+
+  ingest: rust-victoriametrics > go-victoriametrics > csharp-victoriametrics > python-victoriametrics
+  > rust-influxdb > go-influxdb > csharp-influxdb > rust-clickhouse > go-clickhouse
+  > python-influxdb > rust-questdb > csharp-questdb > python-clickhouse > go-questdb
+  > csharp-clickhouse > python-questdb > python-timescaledb > go-timescaledb > rust-timescaledb
+  > csharp-timescaledb
+
+  '

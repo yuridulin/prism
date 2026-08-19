@@ -13,11 +13,27 @@
 
 ## Что сравниваем
 
-- `iot-steady`, `high-cardinality`, `burst` — запись. locf/range там будут `n/a`.
+- `iot-steady`, `high-cardinality`, `burst` — запись при фиксированном offer. locf/range там будут `n/a`.
+- `write-ceiling` — потолок записи. HTTP, offer выше конверта; ingest/s и ошибки — это пара, не NATS.
 - Чтения — профиль `query-mix`.
+- Полная матрица: 4 API × 5 БД. Пары по очереди, тот же envelope.
 - Scorecard: ingest, ошибки write/query, p95 write/locf/range (backend и storage), CPU/RAM.
 - На лёгком ingest (~2k/s) пары не разъедутся по rate — не писать «все одинаковые».
 - CPU API в конце часто 0%: снимок `docker stats` после генератора.
+
+## Арена записи
+
+Четыре чемпиона (Go / Python / C# / Rust) соревнуются на `write-ceiling`.
+Побеждает выше ingest/s без ошибок; при равенстве — ниже write p95.
+
+Сейчас адаптеры наивные: Timescale — INSERT по строке (Rust даже по одному execute в транзакции),
+QuestDB — HTTP `/write`, хотя есть ILP `:9009`, VM — prometheus import.
+
+Разрешено: COPY / UNNEST, ILP TCP, raw Influx line, VM `/api/v1/import`, пулы, reuse HTTP, async insert.
+Запрещено: менять OpenAPI, семантику locf/range, envelope, чужой `apps/<backend>`, генератор, профили.
+`/readyz` и Observed-метрики должны жить.
+
+Каждый чемпион трогает только свой каталог: `apps/go-api`, `apps/python-api`, `apps/csharp-api`, `apps/rust-api`.
 
 ## Контракт
 

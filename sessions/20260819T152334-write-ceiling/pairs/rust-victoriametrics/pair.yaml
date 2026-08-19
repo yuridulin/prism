@@ -1,0 +1,70 @@
+backend: rust
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-19T16:28:40Z'
+  finished_at: '2026-08-19T16:31:50Z'
+services:
+- nats
+- victoriametrics
+- rust-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 21726750
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 120701.9
+meta:
+  backend: rust
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: rust
+  storage: victoriametrics
+  ingest_rate: 120664.2857142857
+  write_error_rate: null
+  write_p95_seconds: 0.00482622306961302
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.00482622306961302
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.004924438157426387
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 3.742MiB
+  - name: prism-nats-1
+    cpu: 0.04%
+    mem: 8.91MiB
+  - name: prism-prometheus-1
+    cpu: 0.24%
+    mem: 33.77MiB
+  - name: prism-victoriametrics-1
+    cpu: 1.70%
+    mem: 107.2MiB
+  api:
+    cpu: 0.00%
+    mem: 3.742MiB
+  storage:
+    cpu: 1.70%
+    mem: 107.2MiB

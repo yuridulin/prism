@@ -146,6 +146,7 @@ services:
       POSTGRES_DSN: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@timescaledb:5432/${POSTGRES_DB:-prism}?sslmode=disable
       CLICKHOUSE_DSN: clickhouse://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:9000/${CLICKHOUSE_DB:-prism}
       QUESTDB_URL: http://questdb:9000
+      QUESTDB_ILP: questdb:9009
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
       INFLUX_ORG: ${INFLUX_ORG:-prism}
@@ -170,6 +171,7 @@ services:
       CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:8123
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-prism}
       QUESTDB_URL: http://questdb:9000
+      QUESTDB_ILP: questdb:9009
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
       INFLUX_ORG: ${INFLUX_ORG:-prism}
@@ -194,6 +196,7 @@ services:
       CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:8123
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-prism}
       QUESTDB_URL: http://questdb:9000
+      QUESTDB_ILP: questdb:9009
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
       INFLUX_ORG: ${INFLUX_ORG:-prism}
@@ -218,6 +221,7 @@ services:
       CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:8123
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-prism}
       QUESTDB_URL: http://questdb:9000
+      QUESTDB_ILP: questdb:9009
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
       INFLUX_ORG: ${INFLUX_ORG:-prism}

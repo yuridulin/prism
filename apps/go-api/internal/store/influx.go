@@ -1,36 +1,56 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
-	"github.com/influxdata/influxdb-client-go/v2/api/write"
 
 	"prism/go-api/internal/config"
 	"prism/go-api/internal/model"
 )
 
 type Influx struct {
-	client influxdb2.Client
-	org    string
-	bucket string
-	tags   catalogMem
+	client   influxdb2.Client
+	http     *http.Client
+	writeURL string
+	token    string
+	org      string
+	bucket   string
+	tags     catalogMem
 }
 
 func NewInflux(cfg config.Config) (*Influx, error) {
 	client := influxdb2.NewClient(cfg.InfluxURL, cfg.InfluxToken)
-	return &Influx{client: client, org: cfg.InfluxOrg, bucket: cfg.InfluxBucket}, nil
+	writeURL := strings.TrimRight(cfg.InfluxURL, "/") + "/api/v2/write?" + url.Values{
+		"org":       {cfg.InfluxOrg},
+		"bucket":    {cfg.InfluxBucket},
+		"precision": {"ns"},
+	}.Encode()
+	return &Influx{
+		client:   client,
+		http:     newWriteHTTPClient(30 * time.Second),
+		writeURL: writeURL,
+		token:    cfg.InfluxToken,
+		org:      cfg.InfluxOrg,
+		bucket:   cfg.InfluxBucket,
+	}, nil
 }
 
 func (s *Influx) Name() string { return "influxdb" }
 
 func (s *Influx) Close() error {
 	s.client.Close()
+	s.http.CloseIdleConnections()
 	return nil
 }
 
@@ -49,17 +69,39 @@ func (s *Influx) Write(ctx context.Context, samples []model.Sample) error {
 	if len(samples) == 0 {
 		return nil
 	}
-	api := s.client.WriteAPIBlocking(s.org, s.bucket)
-	batch := make([]*write.Point, 0, len(samples))
-	for _, p := range samples {
-		batch = append(batch, influxdb2.NewPoint(
-			"samples",
-			map[string]string{"tag_id": strconv.FormatUint(uint64(p.TagID), 10)},
-			map[string]any{"value": p.Value, "quality": int64(p.Quality)},
-			p.TS.UTC(),
-		))
+	buf := getBuf()
+	defer putBuf(buf)
+	for i := range samples {
+		appendInfluxLine(buf, &samples[i])
 	}
-	return api.WritePoint(ctx, batch...)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.writeURL, bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Token "+s.token)
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer closeHTTP(resp)
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("influx write %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+func appendInfluxLine(buf *bytes.Buffer, p *model.Sample) {
+	buf.WriteString("samples,tag_id=")
+	buf.WriteString(strconv.FormatUint(uint64(p.TagID), 10))
+	buf.WriteString(" value=")
+	buf.WriteString(strconv.FormatFloat(p.Value, 'g', -1, 64))
+	buf.WriteString(",quality=")
+	buf.WriteString(strconv.FormatUint(uint64(p.Quality), 10))
+	buf.WriteString("i ")
+	buf.WriteString(strconv.FormatInt(p.TS.UTC().UnixNano(), 10))
+	buf.WriteByte('\n')
 }
 
 func (s *Influx) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {

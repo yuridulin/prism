@@ -16,21 +16,27 @@ import (
 )
 
 type VictoriaMetrics struct {
-	base   string
-	client *http.Client
-	tags   catalogMem
+	base     string
+	writeURL string
+	client   *http.Client
+	tags     catalogMem
 }
 
 func NewVictoriaMetrics(base string) (*VictoriaMetrics, error) {
+	base = strings.TrimRight(base, "/")
 	return &VictoriaMetrics{
-		base:   strings.TrimRight(base, "/"),
-		client: &http.Client{Timeout: 15 * time.Second},
+		base:     base,
+		writeURL: base + "/write?precision=ns",
+		client:   newWriteHTTPClient(15 * time.Second),
 	}, nil
 }
 
 func (s *VictoriaMetrics) Name() string { return "victoriametrics" }
 
-func (s *VictoriaMetrics) Close() error { return nil }
+func (s *VictoriaMetrics) Close() error {
+	s.client.CloseIdleConnections()
+	return nil
+}
 
 func (s *VictoriaMetrics) Ping(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/health", nil)
@@ -41,7 +47,7 @@ func (s *VictoriaMetrics) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeHTTP(resp)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("vm health status %d", resp.StatusCode)
 	}
@@ -52,22 +58,34 @@ func (s *VictoriaMetrics) Write(ctx context.Context, samples []model.Sample) err
 	if len(samples) == 0 {
 		return nil
 	}
-	var buf bytes.Buffer
-	for _, p := range samples {
-		fmt.Fprintf(&buf, `prism_sample{tag_id="%d",quality="%d"} %s %d`+"\n",
-			p.TagID, p.Quality, strconv.FormatFloat(p.Value, 'f', -1, 64), p.TS.UTC().UnixMilli())
+	buf := getBuf()
+	defer putBuf(buf)
+	for i := range samples {
+		p := &samples[i]
+		// Empty measurement: VM uses the field name as the metric, so locf/range
+		// still query prism_sample{tag_id,quality} like the old Prometheus import.
+		buf.WriteString(",tag_id=")
+		buf.WriteString(strconv.FormatUint(uint64(p.TagID), 10))
+		buf.WriteString(",quality=")
+		buf.WriteString(strconv.FormatUint(uint64(p.Quality), 10))
+		buf.WriteString(" prism_sample=")
+		buf.WriteString(strconv.FormatFloat(p.Value, 'g', -1, 64))
+		buf.WriteByte(' ')
+		buf.WriteString(strconv.FormatInt(p.TS.UTC().UnixNano(), 10))
+		buf.WriteByte('\n')
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base+"/api/v1/import/prometheus", &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.writeURL, bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Content-Type", "text/plain")
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeHTTP(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return fmt.Errorf("vm write status %d: %s", resp.StatusCode, body)
 	}
 	return nil
@@ -130,7 +148,7 @@ func (s *VictoriaMetrics) Range(ctx context.Context, tagIDs []uint32, from, to t
 				Values     []float64         `json:"values"`
 			}
 			if err := dec.Decode(&row); err != nil {
-				resp.Body.Close()
+				closeHTTP(resp)
 				return nil, err
 			}
 			q := uint16(0)
@@ -150,7 +168,7 @@ func (s *VictoriaMetrics) Range(ctx context.Context, tagIDs []uint32, from, to t
 				mid = append(mid, model.Sample{TS: t, TagID: id, Value: val, Quality: q})
 			}
 		}
-		resp.Body.Close()
+		closeHTTP(resp)
 	}
 	return append(seed, mid...), nil
 }
@@ -173,9 +191,9 @@ func (s *VictoriaMetrics) getJSON(ctx context.Context, path string, dest any) er
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeHTTP(resp)
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return fmt.Errorf("vm query status %d: %s", resp.StatusCode, body)
 	}
 	return json.NewDecoder(resp.Body).Decode(dest)

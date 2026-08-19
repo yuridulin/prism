@@ -1,0 +1,23 @@
+name: write-ceiling
+description: >-
+  Offer more writes than the 1 CPU / 512M API envelope can take.
+  HTTP so backpressure is the pair, not NATS publish.
+
+transport: http
+duration: 0
+
+ingest:
+  enabled: true
+  rate: 25000
+  batch: 250
+  workers: 8
+  tag_start: 1
+  tag_count: 250
+  good_ratio: 0.98
+  out_of_order: 0.0
+  late_ms: 0
+
+query:
+  enabled: false
+  rate: 0
+  mix: []

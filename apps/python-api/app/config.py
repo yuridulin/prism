@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     clickhouse_url: str = "http://prism:prism@clickhouse:8123"
     clickhouse_db: str = "prism"
     questdb_url: str = "http://questdb:9000"
+    questdb_ilp: str = "questdb:9009"
     influx_url: str = "http://influxdb:8086"
     influx_token: str = "prism-dev-token"
     influx_org: str = "prism"

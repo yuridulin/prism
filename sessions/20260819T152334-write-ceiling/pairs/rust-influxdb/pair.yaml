@@ -1,0 +1,70 @@
+backend: rust
+storage: influxdb
+status: completed
+when:
+  started_at: '2026-08-19T16:25:26Z'
+  finished_at: '2026-08-19T16:28:36Z'
+services:
+- nats
+- influxdb
+- rust-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 14183750
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 78796.9
+meta:
+  backend: rust
+  storage: influxdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: rust
+  storage: influxdb
+  ingest_rate: 79457.14285714284
+  write_error_rate: null
+  write_p95_seconds: 0.06527135044173306
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.06527135044173306
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.06648261758691186
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-rust-api-1
+    cpu: 0.03%
+    mem: 3.609MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 7.699MiB
+  - name: prism-prometheus-1
+    cpu: 0.33%
+    mem: 32.19MiB
+  - name: prism-influxdb-1
+    cpu: 0.04%
+    mem: 329.8MiB
+  api:
+    cpu: 0.03%
+    mem: 3.609MiB
+  storage:
+    cpu: 0.04%
+    mem: 329.8MiB

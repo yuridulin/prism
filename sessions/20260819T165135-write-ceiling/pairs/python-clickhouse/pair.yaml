@@ -1,0 +1,70 @@
+backend: python
+storage: clickhouse
+status: completed
+when:
+  started_at: '2026-08-19T17:12:11Z'
+  finished_at: '2026-08-19T17:15:23Z'
+services:
+- nats
+- clickhouse
+- python-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 6116000
+  queries: 0
+  write_errors: 2
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 33977.5
+meta:
+  backend: python
+  storage: clickhouse
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: python
+  storage: clickhouse
+  ingest_rate: 33860.38697585116
+  write_error_rate: 0.0060743792673977485
+  write_p95_seconds: 0.08441329856584093
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.08435209424083769
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.09452453142227123
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-python-api-1
+    cpu: 0.12%
+    mem: 59.53MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 7.895MiB
+  - name: prism-clickhouse-1
+    cpu: 4.49%
+    mem: 919.2MiB
+  - name: prism-prometheus-1
+    cpu: 0.19%
+    mem: 53.7MiB
+  api:
+    cpu: 0.12%
+    mem: 59.53MiB
+  storage:
+    cpu: 4.49%
+    mem: 919.2MiB

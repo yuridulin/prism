@@ -22,3 +22,59 @@ sessions:
   - csharp-questdb
   - rust-questdb
   path: sessions/20260819T031045-iot-steady/session.yaml
+- id: 20260819T152334-write-ceiling
+  status: completed
+  created_at: '2026-08-19T15:23:34Z'
+  why: 'Потолок записи: все API x все БД, HTTP backpressure выше конверта'
+  profile: write-ceiling
+  duration: 3m
+  pairs:
+  - go-questdb
+  - go-clickhouse
+  - go-timescaledb
+  - go-influxdb
+  - go-victoriametrics
+  - python-questdb
+  - python-clickhouse
+  - python-timescaledb
+  - python-influxdb
+  - python-victoriametrics
+  - csharp-questdb
+  - csharp-clickhouse
+  - csharp-timescaledb
+  - csharp-influxdb
+  - csharp-victoriametrics
+  - rust-questdb
+  - rust-clickhouse
+  - rust-timescaledb
+  - rust-influxdb
+  - rust-victoriametrics
+  path: sessions/20260819T152334-write-ceiling/session.yaml
+- id: 20260819T165135-write-ceiling
+  status: completed
+  created_at: '2026-08-19T16:51:35Z'
+  why: 'Арена rematch: COPY/ILP/line-protocol против baseline write-ceiling'
+  profile: write-ceiling
+  duration: 3m
+  pairs:
+  - go-questdb
+  - go-clickhouse
+  - go-timescaledb
+  - go-influxdb
+  - go-victoriametrics
+  - python-questdb
+  - python-clickhouse
+  - python-timescaledb
+  - python-influxdb
+  - python-victoriametrics
+  - csharp-questdb
+  - csharp-clickhouse
+  - csharp-timescaledb
+  - csharp-influxdb
+  - csharp-victoriametrics
+  - rust-questdb
+  - rust-clickhouse
+  - rust-timescaledb
+  - rust-influxdb
+  - rust-victoriametrics
+  path: sessions/20260819T165135-write-ceiling/session.yaml

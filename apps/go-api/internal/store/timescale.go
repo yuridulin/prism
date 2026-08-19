@@ -20,6 +20,7 @@ func NewTimescale(dsn string) (*Timescale, error) {
 		return nil, err
 	}
 	cfg.MaxConns = 16
+	cfg.MinConns = 4
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		return nil, err
@@ -42,20 +43,36 @@ func (s *Timescale) Write(ctx context.Context, samples []model.Sample) error {
 	if len(samples) == 0 {
 		return nil
 	}
-	batch := &pgx.Batch{}
-	const q = `INSERT INTO samples (ts, tag_id, value, quality) VALUES ($1, $2, $3, $4)`
-	for _, p := range samples {
-		batch.Queue(q, p.TS.UTC(), int32(p.TagID), float32(p.Value), int16(p.Quality))
-	}
-	br := s.pool.SendBatch(ctx, batch)
-	defer br.Close()
-	for range samples {
-		if _, err := br.Exec(); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := s.pool.CopyFrom(
+		ctx,
+		pgx.Identifier{"samples"},
+		[]string{"ts", "tag_id", "value", "quality"},
+		&sampleCopySrc{samples: samples, idx: -1, row: make([]any, 4)},
+	)
+	return err
 }
+
+type sampleCopySrc struct {
+	samples []model.Sample
+	idx     int
+	row     []any
+}
+
+func (s *sampleCopySrc) Next() bool {
+	s.idx++
+	return s.idx < len(s.samples)
+}
+
+func (s *sampleCopySrc) Values() ([]any, error) {
+	p := &s.samples[s.idx]
+	s.row[0] = p.TS.UTC()
+	s.row[1] = int32(p.TagID)
+	s.row[2] = float32(p.Value)
+	s.row[3] = int16(p.Quality)
+	return s.row, nil
+}
+
+func (s *sampleCopySrc) Err() error { return nil }
 
 func (s *Timescale) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
 	rows, err := s.pool.Query(ctx, `
@@ -168,4 +185,3 @@ func scanSamplesCarried(rows pgx.Rows) ([]model.Sample, error) {
 	}
 	return out, rows.Err()
 }
-

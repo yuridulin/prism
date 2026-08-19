@@ -1,0 +1,70 @@
+backend: python
+storage: questdb
+status: completed
+when:
+  started_at: '2026-08-19T17:08:31Z'
+  finished_at: '2026-08-19T17:12:06Z'
+services:
+- nats
+- questdb
+- python-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 16873250
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 93738.1
+meta:
+  backend: python
+  storage: questdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: python
+  storage: questdb
+  ingest_rate: 94051.42857142855
+  write_error_rate: null
+  write_p95_seconds: 0.004751226849389993
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.004751226849389993
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.022539390612132858
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-python-api-1
+    cpu: 0.32%
+    mem: 66.4MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 8.246MiB
+  - name: prism-questdb-1
+    cpu: 11.76%
+    mem: 580.5MiB
+  - name: prism-prometheus-1
+    cpu: 0.21%
+    mem: 28.11MiB
+  api:
+    cpu: 0.32%
+    mem: 66.4MiB
+  storage:
+    cpu: 11.76%
+    mem: 580.5MiB

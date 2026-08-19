@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -152,9 +153,19 @@ pub fn join_ids(ids: &[u32]) -> String {
     ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",")
 }
 
+/// ILP requires a decimal point on whole floats (`1.0`, not `1`).
+pub fn append_ilp_float(buf: &mut String, v: f64) {
+    if v.is_finite() && v.fract() == 0.0 {
+        let _ = write!(buf, "{v:.1}");
+    } else {
+        let _ = write!(buf, "{v}");
+    }
+}
+
 pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        .pool_max_idle_per_host(16)
         .build()
         .expect("http client")
 }
@@ -163,7 +174,7 @@ pub async fn open(kind: &str, cfg: &crate::Config) -> Result<Observed> {
     let inner: Box<dyn Store> = match kind {
         "timescaledb" => Box::new(Timescale::connect(&cfg.postgres_dsn).await?),
         "clickhouse" => Box::new(ClickHouse::connect(&cfg.clickhouse_url, &cfg.clickhouse_db)?),
-        "questdb" => Box::new(QuestDb::new(&cfg.questdb_url)),
+        "questdb" => Box::new(QuestDb::new(&cfg.questdb_url, &cfg.questdb_ilp)),
         "influxdb" => Box::new(Influx::new(
             &cfg.influx_url,
             &cfg.influx_token,

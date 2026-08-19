@@ -1,13 +1,16 @@
+use std::fmt::Write as _;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use url::Url;
 
-use super::{http_client, Catalog, Result, Store, StoreError};
+use super::{append_ilp_float, http_client, Catalog, Result, Store, StoreError};
 use crate::model::{Sample, Tag};
 
 pub struct Influx {
     base: String,
-    token: String,
+    write_url: Url,
+    auth: String,
     org: String,
     bucket: String,
     client: reqwest::Client,
@@ -16,9 +19,17 @@ pub struct Influx {
 
 impl Influx {
     pub fn new(url: &str, token: &str, org: &str, bucket: &str) -> Self {
+        let base = url.trim_end_matches('/').to_string();
+        let mut write_url = Url::parse(&format!("{base}/api/v2/write")).expect("influx write url");
+        write_url
+            .query_pairs_mut()
+            .append_pair("org", org)
+            .append_pair("bucket", bucket)
+            .append_pair("precision", "ns");
         Self {
-            base: url.trim_end_matches('/').to_string(),
-            token: token.to_string(),
+            base,
+            write_url,
+            auth: format!("Token {token}"),
             org: org.to_string(),
             bucket: bucket.to_string(),
             client: http_client(),
@@ -32,7 +43,7 @@ impl Influx {
         let resp = self
             .client
             .post(u)
-            .header("Authorization", format!("Token {}", self.token))
+            .header("Authorization", self.auth.as_str())
             .header("Content-Type", "application/vnd.flux")
             .header("Accept", "application/csv")
             .body(flux.to_string())
@@ -103,12 +114,15 @@ fn influx_tag_filter(ids: &[u32]) -> String {
         .join(" or ")
 }
 
-fn ilp_float(v: f64) -> String {
-    if v.fract() == 0.0 {
-        format!("{v:.1}")
-    } else {
-        format!("{v}")
-    }
+fn append_ilp_line(buf: &mut String, p: &Sample) {
+    let _ = write!(buf, "samples,tag_id={} value=", p.tag_id);
+    append_ilp_float(buf, p.value);
+    let _ = write!(
+        buf,
+        ",quality={}i {}\n",
+        p.quality,
+        p.ts.timestamp_nanos_opt().unwrap_or(0)
+    );
 }
 
 fn parse_flux_csv(text: &str, carried: bool) -> Result<Vec<Sample>> {
@@ -178,25 +192,14 @@ impl Store for Influx {
         if samples.is_empty() {
             return Ok(());
         }
-        let mut body = String::new();
+        let mut body = String::with_capacity(samples.len() * 48);
         for p in samples {
-            body.push_str(&format!(
-                "samples,tag_id={} value={},quality={}i {}\n",
-                p.tag_id,
-                ilp_float(p.value),
-                p.quality,
-                p.ts.timestamp_nanos_opt().unwrap_or(0)
-            ));
+            append_ilp_line(&mut body, p);
         }
-        let mut u = Url::parse(&format!("{}/api/v2/write", self.base))?;
-        u.query_pairs_mut()
-            .append_pair("org", &self.org)
-            .append_pair("bucket", &self.bucket)
-            .append_pair("precision", "ns");
         let resp = self
             .client
-            .post(u)
-            .header("Authorization", format!("Token {}", self.token))
+            .post(self.write_url.clone())
+            .header("Authorization", self.auth.as_str())
             .header("Content-Type", "text/plain; charset=utf-8")
             .body(body)
             .send()

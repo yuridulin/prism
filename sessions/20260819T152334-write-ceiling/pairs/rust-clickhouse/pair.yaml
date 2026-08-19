@@ -1,0 +1,70 @@
+backend: rust
+storage: clickhouse
+status: completed
+when:
+  started_at: '2026-08-19T16:18:40Z'
+  finished_at: '2026-08-19T16:21:53Z'
+services:
+- nats
+- clickhouse
+- rust-api
+- prometheus
+generator:
+  profile: write-ceiling
+  written: 6934000
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 38520.6
+meta:
+  backend: rust
+  storage: clickhouse
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: rust
+  storage: clickhouse
+  ingest_rate: 38098.57142857142
+  write_error_rate: null
+  write_p95_seconds: 0.09582185458676515
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.09582126118449086
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.09601068965517243
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 15.39MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 6.258MiB
+  - name: prism-clickhouse-1
+    cpu: 5.90%
+    mem: 836.7MiB
+  - name: prism-prometheus-1
+    cpu: 0.24%
+    mem: 55.5MiB
+  api:
+    cpu: 0.00%
+    mem: 15.39MiB
+  storage:
+    cpu: 5.90%
+    mem: 836.7MiB

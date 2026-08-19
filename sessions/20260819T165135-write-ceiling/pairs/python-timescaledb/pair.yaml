@@ -1,0 +1,74 @@
+backend: python
+storage: timescaledb
+status: completed
+when:
+  started_at: '2026-08-19T17:15:39Z'
+  finished_at: '2026-08-19T17:18:59Z'
+services:
+- nats
+- timescaledb
+- python-api
+- prometheus
+- postgres-exporter
+generator:
+  profile: write-ceiling
+  written: 8868000
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 49265.8
+meta:
+  backend: python
+  storage: timescaledb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: python
+  storage: timescaledb
+  ingest_rate: 49434.28571428571
+  write_error_rate: null
+  write_p95_seconds: 0.0415792349726776
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.0415792349726776
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.0467328618063112
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-python-api-1
+    cpu: 2.30%
+    mem: 59.3MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 29.94MiB
+  - name: prism-timescaledb-1
+    cpu: 2.55%
+    mem: 378.1MiB
+  - name: prism-nats-1
+    cpu: 0.05%
+    mem: 11.21MiB
+  - name: prism-prometheus-1
+    cpu: 0.39%
+    mem: 41.12MiB
+  api:
+    cpu: 2.30%
+    mem: 59.3MiB
+  storage:
+    cpu: 2.55%
+    mem: 378.1MiB

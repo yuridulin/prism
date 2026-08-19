@@ -20,7 +20,9 @@ func NewClickHouse(dsn string) (*ClickHouse, error) {
 		return nil, err
 	}
 	opts.MaxOpenConns = 16
+	opts.MaxIdleConns = 16
 	opts.DialTimeout = 5 * time.Second
+	opts.Compression = &clickhouse.Compression{Method: clickhouse.CompressionLZ4}
 	conn, err := clickhouse.Open(opts)
 	if err != nil {
 		return nil, err
@@ -38,12 +40,28 @@ func (s *ClickHouse) Write(ctx context.Context, samples []model.Sample) error {
 	if len(samples) == 0 {
 		return nil
 	}
+	if err := s.insert(ctx, samples); err != nil {
+		return s.insert(ctx, samples)
+	}
+	return nil
+}
+
+func (s *ClickHouse) insert(ctx context.Context, samples []model.Sample) error {
+	// Short busy window coalesces the 8 write-ceiling workers into fewer parts
+	// without parking each HTTP write for the default 200ms flush.
+	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
+		"async_insert":                 1,
+		"wait_for_async_insert":        1,
+		"async_insert_busy_timeout_ms": 10,
+	}))
 	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO samples (ts, tag_id, value, quality)")
 	if err != nil {
 		return err
 	}
-	for _, p := range samples {
+	for i := range samples {
+		p := &samples[i]
 		if err := batch.Append(p.TS.UTC(), p.TagID, float32(p.Value), p.Quality); err != nil {
+			_ = batch.Abort()
 			return err
 		}
 	}
@@ -95,6 +113,7 @@ func (s *ClickHouse) UpsertTags(ctx context.Context, tags []model.Tag) error {
 	}
 	for _, t := range tags {
 		if err := batch.Append(t.ID, t.Name, t.Unit); err != nil {
+			_ = batch.Abort()
 			return err
 		}
 	}
@@ -148,4 +167,3 @@ func scanCHCarried(rows driver.Rows) ([]model.Sample, error) {
 	}
 	return out, rows.Err()
 }
-

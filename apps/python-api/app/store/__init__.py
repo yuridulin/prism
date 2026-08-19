@@ -15,7 +15,7 @@ def create_store() -> Store:
     elif name == "clickhouse":
         inner = ClickHouseStore(settings.clickhouse_url, settings.clickhouse_db)
     elif name == "questdb":
-        inner = QuestDBStore(settings.questdb_url)
+        inner = QuestDBStore(settings.questdb_url, settings.questdb_ilp)
     elif name == "influxdb":
         inner = InfluxStore(settings.influx_url, settings.influx_token, settings.influx_org, settings.influx_bucket)
     elif name == "victoriametrics":

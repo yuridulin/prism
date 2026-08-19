@@ -1,0 +1,26 @@
+# Baseline to beat. Session 20260819T152334-write-ceiling, 3m HTTP.
+# Win: higher ingest_rate, then zero write_errors, then lower write_p95_ms.
+
+envelope: { api: 1 CPU / 512M, storage: 1 CPU / 1G, generator: 2 CPU / 1G }
+
+pairs:
+  go-questdb:            { ingest: 25126, err: 0, p95_ms: 96.9 }
+  go-clickhouse:         { ingest: 35855, err: 9, p95_ms: 99.3 }
+  go-timescaledb:        { ingest:  6144, err: 0, p95_ms: 492 }
+  go-influxdb:           { ingest: 76598, err: 0, p95_ms: 68.0 }
+  go-victoriametrics:    { ingest: 120184, err: 0, p95_ms: 4.8 }
+  python-questdb:        { ingest: 11692, err: 0, p95_ms: 93.1 }
+  python-clickhouse:     { ingest: 25287, err: 0, p95_ms: 23.3 }
+  python-timescaledb:    { ingest:  6287, err: 0, p95_ms: 489 }
+  python-influxdb:       { ingest: 29543, err: 0, p95_ms: 9.8 }
+  python-victoriametrics:{ ingest: 83236, err: 0, p95_ms: 4.8 }
+  csharp-questdb:        { ingest: 25525, err: 0, p95_ms: 96.8 }
+  csharp-clickhouse:     { ingest: 21095, err: 1, p95_ms: 155 }
+  csharp-timescaledb:    { ingest:  3636, err: 0, p95_ms: 954 }
+  csharp-influxdb:       { ingest: 71704, err: 0, p95_ms: 72.5 }
+  csharp-victoriametrics:{ ingest: 113463, err: 0, p95_ms: 4.9 }
+  rust-questdb:          { ingest: 25539, err: 0, p95_ms: 96.8 }
+  rust-clickhouse:       { ingest: 38521, err: 0, p95_ms: 95.8 }
+  rust-timescaledb:      { ingest:  4508, err: 0, p95_ms: 596 }
+  rust-influxdb:         { ingest: 78797, err: 0, p95_ms: 65.3 }
+  rust-victoriametrics:  { ingest: 120702, err: 0, p95_ms: 4.8 }

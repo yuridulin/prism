@@ -1,8 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import asyncpg
 
 from app.models import Sample, Tag
+
+
+def _utc(ts: datetime) -> datetime:
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
 
 
 class TimescaleStore:
@@ -14,7 +20,7 @@ class TimescaleStore:
 
     async def _conn(self) -> asyncpg.Pool:
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=16)
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=4, max_size=16)
         return self._pool
 
     async def ping(self) -> None:
@@ -25,9 +31,13 @@ class TimescaleStore:
         if not samples:
             return
         pool = await self._conn()
-        await pool.executemany(
-            "INSERT INTO samples (ts, tag_id, value, quality) VALUES ($1, $2, $3, $4)",
-            [(s.ts, s.tag_id, s.value, s.quality) for s in samples],
+        records = [
+            (_utc(s.ts), int(s.tag_id), float(s.value), int(s.quality)) for s in samples
+        ]
+        await pool.copy_records_to_table(
+            "samples",
+            records=records,
+            columns=["ts", "tag_id", "value", "quality"],
         )
 
     async def locf(self, tag_ids: list[int], at: datetime) -> list[Sample]:

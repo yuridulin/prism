@@ -69,17 +69,28 @@ impl Store for Timescale {
         if samples.is_empty() {
             return Ok(());
         }
-        let mut tx = self.pool.begin().await?;
+        let mut ts = Vec::with_capacity(samples.len());
+        let mut tag_ids = Vec::with_capacity(samples.len());
+        let mut values = Vec::with_capacity(samples.len());
+        let mut qualities = Vec::with_capacity(samples.len());
         for s in samples {
-            sqlx::query("INSERT INTO samples (ts, tag_id, value, quality) VALUES ($1, $2, $3, $4)")
-                .bind(s.ts)
-                .bind(s.tag_id as i32)
-                .bind(s.value as f32)
-                .bind(s.quality as i16)
-                .execute(&mut *tx)
-                .await?;
+            ts.push(s.ts);
+            tag_ids.push(s.tag_id as i32);
+            values.push(s.value as f32);
+            qualities.push(s.quality as i16);
         }
-        tx.commit().await?;
+        sqlx::query(
+            r#"
+            INSERT INTO samples (ts, tag_id, value, quality)
+            SELECT * FROM UNNEST($1::timestamptz[], $2::int4[], $3::float4[], $4::int2[])
+            "#,
+        )
+        .bind(&ts)
+        .bind(&tag_ids)
+        .bind(&values)
+        .bind(&qualities)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
