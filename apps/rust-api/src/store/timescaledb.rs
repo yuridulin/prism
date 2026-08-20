@@ -98,10 +98,15 @@ impl Store for Timescale {
         let ids: Vec<i32> = tag_ids.iter().map(|&id| id as i32).collect();
         let rows = sqlx::query_as::<_, SampleRow>(
             r#"
-            SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality
-            FROM samples
-            WHERE tag_id = ANY($1) AND ts <= $2
-            ORDER BY tag_id, ts DESC
+            SELECT s.ts, s.tag_id, s.value, s.quality
+            FROM unnest($1::int4[]) AS t(tag_id)
+            CROSS JOIN LATERAL (
+                SELECT ts, tag_id, value, quality
+                FROM samples
+                WHERE samples.tag_id = t.tag_id AND ts <= $2
+                ORDER BY ts DESC
+                LIMIT 1
+            ) s
             "#,
         )
         .bind(&ids)
@@ -116,15 +121,20 @@ impl Store for Timescale {
         let rows = sqlx::query_as::<_, SampleRowCarried>(
             r#"
             SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality, true AS carried
-                FROM samples
-                WHERE tag_id = ANY($1) AND ts <= $2
-                ORDER BY tag_id, ts DESC
+                SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
+                FROM unnest($1::int4[]) AS t(tag_id)
+                CROSS JOIN LATERAL (
+                    SELECT ts, tag_id, value, quality
+                    FROM samples
+                    WHERE samples.tag_id = t.tag_id AND ts <= $2
+                    ORDER BY ts DESC
+                    LIMIT 1
+                ) s
                 UNION ALL
                 SELECT ts, tag_id, value, quality, false
                 FROM samples
                 WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-            ) s
+            ) q
             ORDER BY tag_id, ts
             "#,
         )

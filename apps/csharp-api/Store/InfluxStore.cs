@@ -12,6 +12,8 @@ public sealed class InfluxStore : IStore
     private readonly string _bucket;
     private readonly string _writePath;
     private readonly CatalogMem _tags = new();
+    // Archive max gap is 1h; 3h still finds the previous minute/hour point at 364d ago.
+    private static readonly TimeSpan LocfLookback = TimeSpan.FromHours(3);
 
     public InfluxStore(AppConfig cfg)
     {
@@ -63,11 +65,11 @@ public sealed class InfluxStore : IStore
     }
 
     public Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default) =>
-        QueryLast(tagIds, null, at.ToUniversalTime(), carried: false, ct);
+        QueryLast(tagIds, at.ToUniversalTime(), carried: false, ct);
 
     public async Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
     {
-        var seed = await QueryLast(tagIds, null, from.ToUniversalTime(), carried: true, ct);
+        var seed = await QueryLast(tagIds, from.ToUniversalTime(), carried: true, ct);
         var mid = await QueryWindow(tagIds, from.ToUniversalTime(), to.ToUniversalTime(), ct);
         return seed.Concat(mid).ToList();
     }
@@ -87,17 +89,15 @@ public sealed class InfluxStore : IStore
         return ValueTask.CompletedTask;
     }
 
-    private async Task<IReadOnlyList<Sample>> QueryLast(IReadOnlyList<uint> tagIds, DateTimeOffset? start, DateTimeOffset stop, bool carried, CancellationToken ct)
+    private async Task<IReadOnlyList<Sample>> QueryLast(IReadOnlyList<uint> tagIds, DateTimeOffset stop, bool carried, CancellationToken ct)
     {
-        var startRaw = start is { } s ? StoreUtil.Rfc3339Nano(s) : "-30d";
         var flux = $"""
             from(bucket: "{_bucket}")
-              |> range(start: {startRaw}, stop: {StoreUtil.Rfc3339Nano(stop)})
+              |> range(start: {StoreUtil.Rfc3339Nano(stop - LocfLookback)}, stop: {StoreUtil.Rfc3339Nano(stop.AddTicks(1))})
               |> filter(fn: (r) => r._measurement == "samples")
               |> filter(fn: (r) => {TagFilter(tagIds)})
-              |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-              |> group(columns: ["tag_id"])
               |> last()
+              |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
             """;
         return await Collect(flux, carried, ct);
     }

@@ -10,6 +10,10 @@ def _qdb_time(ts: datetime) -> str:
     return ts.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def _symbol_ids(tag_ids: list[int]) -> str:
+    return ",".join(f"'{i}'" for i in tag_ids)
+
+
 async def _close_writer(writer: asyncio.StreamWriter) -> None:
     try:
         writer.close()
@@ -76,7 +80,7 @@ class QuestDBStore:
 
     async def ping(self) -> None:
         await self._exec(
-            "CREATE TABLE IF NOT EXISTS samples (ts TIMESTAMP, tag_id INT, value FLOAT, quality SHORT) timestamp(ts) PARTITION BY DAY WAL"
+            "CREATE TABLE IF NOT EXISTS samples (ts TIMESTAMP, tag_id SYMBOL CAPACITY 256 CACHE INDEX, value FLOAT, quality SHORT) timestamp(ts) PARTITION BY DAY WAL"
         )
         await self._exec("CREATE TABLE IF NOT EXISTS tags (id INT, name SYMBOL, unit SYMBOL)")
         await self._exec("SELECT 1")
@@ -92,7 +96,7 @@ class QuestDBStore:
         await self._ilp.write("".join(parts).encode("ascii"))
 
     async def locf(self, tag_ids: list[int], at: datetime) -> list[Sample]:
-        ids = ",".join(str(i) for i in tag_ids)
+        ids = _symbol_ids(tag_ids)
         data = await self._exec(
             f"SELECT ts, tag_id, value, quality FROM samples "
             f"WHERE tag_id IN ({ids}) AND ts <= '{_qdb_time(at)}' "
@@ -101,7 +105,7 @@ class QuestDBStore:
         return self._samples(data, False)
 
     async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
-        ids = ",".join(str(i) for i in tag_ids)
+        ids = _symbol_ids(tag_ids)
         data = await self._exec(
             f"""
             SELECT ts, tag_id, value, quality, carried FROM (
@@ -114,7 +118,6 @@ class QuestDBStore:
               FROM samples
               WHERE tag_id IN ({ids}) AND ts > '{_qdb_time(start)}' AND ts <= '{_qdb_time(end)}'
             )
-            ORDER BY tag_id, ts
             """
         )
         return self._samples(data, True)

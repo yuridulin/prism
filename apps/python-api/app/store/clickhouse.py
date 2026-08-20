@@ -21,15 +21,53 @@ def _ch_time(ts: datetime) -> str:
     return utc.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
-def _parse_ts(raw) -> datetime:
-    if isinstance(raw, datetime):
-        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
-    text = str(raw).replace("T", " ").replace("Z", "")
-    if "." in text:
-        dt = datetime.strptime(text[:26], "%Y-%m-%d %H:%M:%S.%f")
-    else:
-        dt = datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
-    return dt.replace(tzinfo=timezone.utc)
+def _from_ms(ms: int) -> datetime:
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+
+
+def _ids(tag_ids: list[int]) -> str:
+    return ",".join(str(int(i)) for i in tag_ids)
+
+
+def _locf_sql(ids: str, at: str, bounded: bool) -> str:
+    at_dt = f"toDateTime64('{at}', 3, 'UTC')"
+    lower = f" AND t.ts >= {at_dt} - INTERVAL 2 DAY" if bounded else ""
+    return f"""
+        SELECT toUnixTimestamp64Milli(s.ts), s.tag_id, s.value, s.quality
+        FROM samples AS s
+        WHERE (s.tag_id, s.ts) IN (
+            SELECT t.tag_id, max(t.ts)
+            FROM samples AS t
+            WHERE t.tag_id IN ({ids}) AND t.ts <= {at_dt}{lower}
+            GROUP BY t.tag_id
+        )
+    """
+
+
+def _parse_rows(blob: bytes, carried: bool) -> list[Sample]:
+    if len(blob) % _ROW.size:
+        raise RuntimeError("clickhouse rowbinary truncated")
+    return [
+        Sample.model_construct(ts=_from_ms(ts), tag_id=tag_id, value=float(value), quality=quality, carried=carried)
+        for ts, tag_id, value, quality in _ROW.iter_unpack(blob)
+    ]
+
+
+def _merge_range(tag_ids: list[int], head: list[Sample], tail: list[Sample]) -> list[Sample]:
+    buckets: dict[int, list[Sample]] = {int(t): [] for t in tag_ids}
+    extra: list[Sample] = []
+    for sample in head:
+        buckets.setdefault(sample.tag_id, []).append(sample)
+    for sample in tail:
+        if sample.tag_id in buckets:
+            buckets[sample.tag_id].append(sample)
+        else:
+            extra.append(sample)
+    out: list[Sample] = []
+    for tag_id in tag_ids:
+        out.extend(buckets[int(tag_id)])
+    out.extend(extra)
+    return out
 
 
 class ClickHouseStore:
@@ -70,41 +108,32 @@ class ClickHouseStore:
         raise last or RuntimeError("clickhouse write failed")
 
     async def locf(self, tag_ids: list[int], at: datetime) -> list[Sample]:
-        ids = ",".join(str(int(i)) for i in tag_ids)
-        rows = await self._query(
-            f"""
-            SELECT ts, tag_id, value, quality
-            FROM samples
-            WHERE tag_id IN ({ids}) AND ts <= '{_ch_time(at)}'
-            ORDER BY tag_id, ts DESC
-            LIMIT 1 BY tag_id
-            """
-        )
-        return [Sample(ts=_parse_ts(r[0]), tag_id=int(r[1]), value=float(r[2]), quality=int(r[3])) for r in rows]
+        stamp = _ch_time(at)
+        rows = _parse_rows(await self._query_binary(_locf_sql(_ids(tag_ids), stamp, True)), False)
+        found = {s.tag_id for s in rows}
+        missing = [int(i) for i in tag_ids if int(i) not in found]
+        if missing:
+            rows.extend(_parse_rows(await self._query_binary(_locf_sql(_ids(missing), stamp, False)), False))
+        return rows
 
     async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
-        ids = ",".join(str(int(i)) for i in tag_ids)
+        head = [s.model_copy(update={"carried": True}) for s in await self.locf(tag_ids, start)]
+        ids = _ids(tag_ids)
         left, right = _ch_time(start), _ch_time(end)
-        rows = await self._query(
-            f"""
-            SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT ts, tag_id, value, quality, 1 AS carried
-                FROM samples
-                WHERE tag_id IN ({ids}) AND ts <= '{left}'
-                ORDER BY tag_id, ts DESC
-                LIMIT 1 BY tag_id
-                UNION ALL
-                SELECT ts, tag_id, value, quality, 0
-                FROM samples
-                WHERE tag_id IN ({ids}) AND ts > '{left}' AND ts <= '{right}'
-            )
-            ORDER BY tag_id, ts
-            """
+        tail = _parse_rows(
+            await self._query_binary(
+                f"""
+                SELECT toUnixTimestamp64Milli(s.ts), s.tag_id, s.value, s.quality
+                FROM samples AS s
+                WHERE s.tag_id IN ({ids})
+                  AND s.ts > toDateTime64('{left}', 3, 'UTC')
+                  AND s.ts <= toDateTime64('{right}', 3, 'UTC')
+                ORDER BY s.tag_id, s.ts
+                """
+            ),
+            False,
         )
-        return [
-            Sample(ts=_parse_ts(r[0]), tag_id=int(r[1]), value=float(r[2]), quality=int(r[3]), carried=bool(r[4]))
-            for r in rows
-        ]
+        return _merge_range(tag_ids, head, tail)
 
     async def upsert_tags(self, tags: list[Tag]) -> None:
         if not tags:
@@ -131,3 +160,11 @@ class ClickHouseStore:
         )
         raise_status(resp, "clickhouse query")
         return resp.json().get("data") or []
+
+    async def _query_binary(self, sql: str) -> bytes:
+        resp = await self._http.post(
+            "/",
+            params={"database": self._db, "query": sql + " FORMAT RowBinary"},
+        )
+        raise_status(resp, "clickhouse query")
+        return resp.content

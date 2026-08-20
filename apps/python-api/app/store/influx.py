@@ -54,7 +54,7 @@ class InfluxStore:
         filt = " or ".join(f'r.tag_id == "{i}"' for i in tag_ids) or "true"
         flux = f'''
 from(bucket: "{self._bucket}")
-  |> range(start: {start.isoformat()}, stop: {(end + timedelta(microseconds=1)).isoformat()})
+  |> range(start: {(start + timedelta(microseconds=1)).isoformat()}, stop: {(end + timedelta(microseconds=1)).isoformat()})
   |> filter(fn: (r) => r._measurement == "samples")
   |> filter(fn: (r) => {filt})
   |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
@@ -63,14 +63,15 @@ from(bucket: "{self._bucket}")
 
     def _last(self, tag_ids: list[int], stop: datetime, carried: bool) -> list[Sample]:
         filt = " or ".join(f'r.tag_id == "{i}"' for i in tag_ids) or "true"
+        # Archive max gap is 1h; 3h still finds the previous minute/hour point at 364d ago.
+        start = stop - timedelta(hours=3)
         flux = f'''
 from(bucket: "{self._bucket}")
-  |> range(start: -30d, stop: {stop.isoformat()})
+  |> range(start: {start.isoformat()}, stop: {(stop + timedelta(microseconds=1)).isoformat()})
   |> filter(fn: (r) => r._measurement == "samples")
   |> filter(fn: (r) => {filt})
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> group(columns: ["tag_id"])
   |> last()
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 '''
         return self._collect(flux, carried)
 

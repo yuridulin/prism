@@ -44,10 +44,15 @@ class TimescaleStore:
         pool = await self._conn()
         rows = await pool.fetch(
             """
-            SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality
-            FROM samples
-            WHERE tag_id = ANY($1) AND ts <= $2
-            ORDER BY tag_id, ts DESC
+            SELECT s.ts, s.tag_id, s.value, s.quality
+            FROM unnest($1::int4[]) AS t(tag_id)
+            CROSS JOIN LATERAL (
+                SELECT ts, tag_id, value, quality
+                FROM samples
+                WHERE samples.tag_id = t.tag_id AND ts <= $2
+                ORDER BY ts DESC
+                LIMIT 1
+            ) s
             """,
             tag_ids,
             at,
@@ -59,15 +64,20 @@ class TimescaleStore:
         rows = await pool.fetch(
             """
             SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality, true AS carried
-                FROM samples
-                WHERE tag_id = ANY($1) AND ts <= $2
-                ORDER BY tag_id, ts DESC
+                SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
+                FROM unnest($1::int4[]) AS t(tag_id)
+                CROSS JOIN LATERAL (
+                    SELECT ts, tag_id, value, quality
+                    FROM samples
+                    WHERE samples.tag_id = t.tag_id AND ts <= $2
+                    ORDER BY ts DESC
+                    LIMIT 1
+                ) s
                 UNION ALL
                 SELECT ts, tag_id, value, quality, false
                 FROM samples
                 WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-            ) s
+            ) q
             ORDER BY tag_id, ts
             """,
             tag_ids,

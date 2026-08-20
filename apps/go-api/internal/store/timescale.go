@@ -39,6 +39,35 @@ func (s *Timescale) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
+const tsLocfSQL = `
+	SELECT s.ts, s.tag_id, s.value, s.quality
+	FROM unnest($1::int4[]) AS t(tag_id)
+	CROSS JOIN LATERAL (
+		SELECT ts, tag_id, value, quality
+		FROM samples
+		WHERE samples.tag_id = t.tag_id AND ts <= $2
+		ORDER BY ts DESC
+		LIMIT 1
+	) s`
+
+const tsRangeSQL = `
+	SELECT ts, tag_id, value, quality, carried FROM (
+		SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
+		FROM unnest($1::int4[]) AS t(tag_id)
+		CROSS JOIN LATERAL (
+			SELECT ts, tag_id, value, quality
+			FROM samples
+			WHERE samples.tag_id = t.tag_id AND ts <= $2
+			ORDER BY ts DESC
+			LIMIT 1
+		) s
+		UNION ALL
+		SELECT ts, tag_id, value, quality, false
+		FROM samples
+		WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
+	) q
+	ORDER BY tag_id, ts`
+
 func (s *Timescale) Write(ctx context.Context, samples []model.Sample) error {
 	if len(samples) == 0 {
 		return nil
@@ -75,11 +104,7 @@ func (s *sampleCopySrc) Values() ([]any, error) {
 func (s *sampleCopySrc) Err() error { return nil }
 
 func (s *Timescale) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality
-		FROM samples
-		WHERE tag_id = ANY($1) AND ts <= $2
-		ORDER BY tag_id, ts DESC`, intTags(tagIDs), at.UTC())
+	rows, err := s.pool.Query(ctx, tsLocfSQL, intTags(tagIDs), at.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -88,19 +113,7 @@ func (s *Timescale) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]
 }
 
 func (s *Timescale) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
-	ids := intTags(tagIDs)
-	rows, err := s.pool.Query(ctx, `
-		SELECT ts, tag_id, value, quality, carried FROM (
-			SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality, true AS carried
-			FROM samples
-			WHERE tag_id = ANY($1) AND ts <= $2
-			ORDER BY tag_id, ts DESC
-			UNION ALL
-			SELECT ts, tag_id, value, quality, false
-			FROM samples
-			WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-		) s
-		ORDER BY tag_id, ts`, ids, from.UTC(), to.UTC())
+	rows, err := s.pool.Query(ctx, tsRangeSQL, intTags(tagIDs), from.UTC(), to.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +167,7 @@ func intTags(ids []uint32) []int32 {
 }
 
 func scanSamples(rows pgx.Rows, carried bool) ([]model.Sample, error) {
-	var out []model.Sample
+	out := make([]model.Sample, 0, 16)
 	for rows.Next() {
 		var s model.Sample
 		var tag int32
@@ -171,7 +184,7 @@ func scanSamples(rows pgx.Rows, carried bool) ([]model.Sample, error) {
 }
 
 func scanSamplesCarried(rows pgx.Rows) ([]model.Sample, error) {
-	var out []model.Sample
+	out := make([]model.Sample, 0, 4096)
 	for rows.Next() {
 		var s model.Sample
 		var tag int32

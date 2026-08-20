@@ -79,49 +79,147 @@ public sealed class ClickHouseStore : IStore
 
     public async Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default)
     {
+        var rows = await LocfQuery(tagIds, at, bounded: true, ct);
+        var missing = MissingTagIds(tagIds, rows);
+        if (missing.Count == 0)
+        {
+            return rows;
+        }
+
+        var rest = await LocfQuery(missing, at, bounded: false, ct);
+        if (rest.Count == 0)
+        {
+            return rows;
+        }
+
+        var merged = new List<Sample>(rows.Count + rest.Count);
+        merged.AddRange(rows);
+        merged.AddRange(rest);
+        return merged;
+    }
+
+    public async Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+    {
+        var head = await LocfAsync(tagIds, from, ct);
         await using var conn = await Open(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             """
-            SELECT ts, tag_id, value, quality
-            FROM samples
-            WHERE tag_id IN {ids:Array(UInt32)} AND ts <= {at:DateTime64}
-            ORDER BY tag_id, ts DESC
-            LIMIT 1 BY tag_id
+            SELECT s.ts, s.tag_id, s.value, s.quality
+            FROM samples AS s
+            WHERE s.tag_id IN {ids:Array(UInt32)} AND s.ts > {from:DateTime64} AND s.ts <= {to:DateTime64}
+            ORDER BY s.tag_id, s.ts
             """;
+        cmd.AddParameter("ids", tagIds.ToArray());
+        cmd.AddParameter("from", from.UtcDateTime);
+        cmd.AddParameter("to", to.UtcDateTime);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var tail = await Scan(reader, carried: false, ct);
+        return MergeRange(tagIds, head, tail);
+    }
+
+    private async Task<IReadOnlyList<Sample>> LocfQuery(IReadOnlyList<uint> tagIds, DateTimeOffset at, bool bounded, CancellationToken ct)
+    {
+        await using var conn = await Open(ct);
+        await using var cmd = conn.CreateCommand();
+        if (bounded)
+        {
+            cmd.CommandText =
+                """
+                SELECT s.ts, s.tag_id, s.value, s.quality
+                FROM samples AS s
+                WHERE (s.tag_id, s.ts) IN (
+                    SELECT t.tag_id, max(t.ts)
+                    FROM samples AS t
+                    WHERE t.tag_id IN {ids:Array(UInt32)} AND t.ts <= {at:DateTime64} AND t.ts >= {since:DateTime64}
+                    GROUP BY t.tag_id
+                )
+                """;
+            cmd.AddParameter("since", at.UtcDateTime.AddDays(-2));
+        }
+        else
+        {
+            cmd.CommandText =
+                """
+                SELECT s.ts, s.tag_id, s.value, s.quality
+                FROM samples AS s
+                WHERE (s.tag_id, s.ts) IN (
+                    SELECT t.tag_id, max(t.ts)
+                    FROM samples AS t
+                    WHERE t.tag_id IN {ids:Array(UInt32)} AND t.ts <= {at:DateTime64}
+                    GROUP BY t.tag_id
+                )
+                """;
+        }
+
         cmd.AddParameter("ids", tagIds.ToArray());
         cmd.AddParameter("at", at.UtcDateTime);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await Scan(reader, carried: false, ct);
     }
 
-    public async Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+    private static List<uint> MissingTagIds(IReadOnlyList<uint> tagIds, IReadOnlyList<Sample> rows)
     {
-        await using var conn = await Open(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            """
-            SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT ts, tag_id, value, quality, 1 AS carried
-                FROM samples
-                WHERE tag_id IN {ids:Array(UInt32)} AND ts <= {from:DateTime64}
-                ORDER BY tag_id, ts DESC
-                LIMIT 1 BY tag_id
-                UNION ALL
-                SELECT ts, tag_id, value, quality, 0
-                FROM samples
-                WHERE tag_id IN {ids2:Array(UInt32)} AND ts > {from2:DateTime64} AND ts <= {to:DateTime64}
-            )
-            ORDER BY tag_id, ts
-            """;
-        var ids = tagIds.ToArray();
-        cmd.AddParameter("ids", ids);
-        cmd.AddParameter("from", from.UtcDateTime);
-        cmd.AddParameter("ids2", ids);
-        cmd.AddParameter("from2", from.UtcDateTime);
-        cmd.AddParameter("to", to.UtcDateTime);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await Scan(reader, carried: null, ct);
+        var found = new HashSet<uint>(rows.Select(s => s.TagId));
+        var missing = new List<uint>();
+        var seen = new HashSet<uint>();
+        foreach (var id in tagIds)
+        {
+            if (!seen.Add(id))
+            {
+                continue;
+            }
+
+            if (!found.Contains(id))
+            {
+                missing.Add(id);
+            }
+        }
+
+        return missing;
+    }
+
+    private static List<Sample> MergeRange(IReadOnlyList<uint> tagIds, IReadOnlyList<Sample> head, IReadOnlyList<Sample> tail)
+    {
+        var buckets = new Dictionary<uint, List<Sample>>(tagIds.Count);
+        foreach (var id in tagIds)
+        {
+            buckets.TryAdd(id, []);
+        }
+
+        foreach (var sample in head)
+        {
+            sample.Carried = true;
+            if (!buckets.TryGetValue(sample.TagId, out var bucket))
+            {
+                bucket = [];
+                buckets[sample.TagId] = bucket;
+            }
+
+            bucket.Add(sample);
+        }
+
+        var extra = new List<Sample>();
+        foreach (var sample in tail)
+        {
+            if (buckets.TryGetValue(sample.TagId, out var bucket))
+            {
+                bucket.Add(sample);
+            }
+            else
+            {
+                extra.Add(sample);
+            }
+        }
+
+        var output = new List<Sample>(head.Count + tail.Count);
+        foreach (var id in tagIds)
+        {
+            output.AddRange(buckets[id]);
+        }
+
+        output.AddRange(extra);
+        return output;
     }
 
     public async Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)

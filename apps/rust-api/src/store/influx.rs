@@ -60,25 +60,24 @@ impl Influx {
     async fn query_last(
         &self,
         tag_ids: &[u32],
-        start: Option<DateTime<Utc>>,
         stop: DateTime<Utc>,
         carried: bool,
     ) -> Result<Vec<Sample>> {
-        let start_raw = start
-            .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
-            .unwrap_or_else(|| "-30d".to_string());
+        // Archive max gap is 1h; 3h still finds the previous minute/hour point at 364d ago.
+        let start = stop - chrono::Duration::hours(3);
+        let stop_excl = stop + chrono::Duration::nanoseconds(1);
         let flux = format!(
             r#"
 from(bucket: {bucket:?})
-  |> range(start: {start_raw}, stop: {stop})
+  |> range(start: {start}, stop: {stop})
   |> filter(fn: (r) => r._measurement == "samples")
   |> filter(fn: (r) => {filter})
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> group(columns: ["tag_id"])
   |> last()
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 "#,
             bucket = self.bucket,
-            stop = stop.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+            start = start.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+            stop = stop_excl.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
             filter = influx_tag_filter(tag_ids),
         );
         self.query_flux(&flux, carried).await
@@ -213,11 +212,11 @@ impl Store for Influx {
     }
 
     async fn locf(&self, tag_ids: &[u32], at: DateTime<Utc>) -> Result<Vec<Sample>> {
-        self.query_last(tag_ids, None, at, false).await
+        self.query_last(tag_ids, at, false).await
     }
 
     async fn range(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let mut seed = self.query_last(tag_ids, None, from, true).await?;
+        let mut seed = self.query_last(tag_ids, from, true).await?;
         let mid = self.query_window(tag_ids, from, to).await?;
         seed.extend(mid);
         Ok(seed)

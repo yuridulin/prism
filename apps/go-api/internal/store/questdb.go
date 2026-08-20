@@ -76,7 +76,7 @@ func (s *QuestDB) Ping(ctx context.Context) error {
 
 func (s *QuestDB) ensure(ctx context.Context) error {
 	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS samples (ts TIMESTAMP, tag_id INT, value FLOAT, quality SHORT) timestamp(ts) PARTITION BY DAY WAL`,
+		`CREATE TABLE IF NOT EXISTS samples (ts TIMESTAMP, tag_id SYMBOL CAPACITY 256 CACHE INDEX, value FLOAT, quality SHORT) timestamp(ts) PARTITION BY DAY WAL`,
 		`CREATE TABLE IF NOT EXISTS tags (id INT, name SYMBOL, unit SYMBOL)`,
 	}
 	for _, q := range stmts {
@@ -181,7 +181,7 @@ func (c *ilpConn) close() {
 func (s *QuestDB) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
 	q := fmt.Sprintf(
 		`SELECT ts, tag_id, value, quality FROM samples WHERE tag_id IN (%s) AND ts <= '%s' LATEST ON ts PARTITION BY tag_id`,
-		joinIDs(tagIDs), qdbTime(at),
+		joinSymbolIDs(tagIDs), qdbTime(at),
 	)
 	data, err := s.exec(ctx, q)
 	if err != nil {
@@ -191,7 +191,7 @@ func (s *QuestDB) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]mo
 }
 
 func (s *QuestDB) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
-	ids := joinIDs(tagIDs)
+	ids := joinSymbolIDs(tagIDs)
 	q := fmt.Sprintf(`
 		SELECT ts, tag_id, value, quality, carried FROM (
 			SELECT ts, tag_id, value, quality, true AS carried
@@ -202,8 +202,7 @@ func (s *QuestDB) Range(ctx context.Context, tagIDs []uint32, from, to time.Time
 			SELECT ts, tag_id, value, quality, false
 			FROM samples
 			WHERE tag_id IN (%s) AND ts > '%s' AND ts <= '%s'
-		)
-		ORDER BY tag_id, ts`, ids, qdbTime(from), ids, qdbTime(from), qdbTime(to))
+		)`, ids, qdbTime(from), ids, qdbTime(from), qdbTime(to))
 	data, err := s.exec(ctx, q)
 	if err != nil {
 		return nil, err
@@ -329,10 +328,10 @@ func asBool(v any) bool {
 	}
 }
 
-func joinIDs(ids []uint32) string {
+func joinSymbolIDs(ids []uint32) string {
 	parts := make([]string, len(ids))
 	for i, id := range ids {
-		parts[i] = strconv.FormatUint(uint64(id), 10)
+		parts[i] = "'" + strconv.FormatUint(uint64(id), 10) + "'"
 	}
 	return strings.Join(parts, ",")
 }

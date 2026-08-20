@@ -68,13 +68,55 @@ func (s *ClickHouse) insert(ctx context.Context, samples []model.Sample) error {
 	return batch.Send()
 }
 
+const chLocfLookback = 48 * time.Hour
+
+const chLocfSQL = `
+		SELECT s.ts, s.tag_id, s.value, s.quality
+		FROM samples AS s
+		WHERE (s.tag_id, s.ts) IN (
+			SELECT t.tag_id, max(t.ts)
+			FROM samples AS t
+			WHERE t.tag_id IN ? AND t.ts <= ?
+			GROUP BY t.tag_id
+		)`
+
+const chLocfBoundedSQL = `
+		SELECT s.ts, s.tag_id, s.value, s.quality
+		FROM samples AS s
+		WHERE (s.tag_id, s.ts) IN (
+			SELECT t.tag_id, max(t.ts)
+			FROM samples AS t
+			WHERE t.tag_id IN ? AND t.ts <= ? AND t.ts >= ?
+			GROUP BY t.tag_id
+		)`
+
 func (s *ClickHouse) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
-	rows, err := s.conn.Query(ctx, `
-		SELECT ts, tag_id, value, quality
-		FROM samples
-		WHERE tag_id IN ? AND ts <= ?
-		ORDER BY tag_id, ts DESC
-		LIMIT 1 BY tag_id`, tagIDs, at.UTC())
+	out, err := s.locf(ctx, tagIDs, at, true)
+	if err != nil {
+		return nil, err
+	}
+	missing := missingTagIDs(tagIDs, out)
+	if len(missing) == 0 {
+		return out, nil
+	}
+	rest, err := s.locf(ctx, missing, at, false)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, rest...), nil
+}
+
+func (s *ClickHouse) locf(ctx context.Context, tagIDs []uint32, at time.Time, bounded bool) ([]model.Sample, error) {
+	at = at.UTC()
+	var (
+		rows driver.Rows
+		err  error
+	)
+	if bounded {
+		rows, err = s.conn.Query(ctx, chLocfBoundedSQL, tagIDs, at, at.Add(-chLocfLookback))
+	} else {
+		rows, err = s.conn.Query(ctx, chLocfSQL, tagIDs, at)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -83,24 +125,68 @@ func (s *ClickHouse) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([
 }
 
 func (s *ClickHouse) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
+	head, err := s.Locf(ctx, tagIDs, from)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.conn.Query(ctx, `
-		SELECT ts, tag_id, value, quality, carried FROM (
-			SELECT ts, tag_id, value, quality, 1 AS carried
-			FROM samples
-			WHERE tag_id IN ? AND ts <= ?
-			ORDER BY tag_id, ts DESC
-			LIMIT 1 BY tag_id
-			UNION ALL
-			SELECT ts, tag_id, value, quality, 0
-			FROM samples
-			WHERE tag_id IN ? AND ts > ? AND ts <= ?
-		)
-		ORDER BY tag_id, ts`, tagIDs, from.UTC(), tagIDs, from.UTC(), to.UTC())
+		SELECT s.ts, s.tag_id, s.value, s.quality
+		FROM samples AS s
+		WHERE s.tag_id IN ? AND s.ts > ? AND s.ts <= ?
+		ORDER BY s.tag_id, s.ts`, tagIDs, from.UTC(), to.UTC())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanCHCarried(rows)
+	tail, err := scanCH(rows, false)
+	if err != nil {
+		return nil, err
+	}
+	return mergeCHRange(tagIDs, head, tail), nil
+}
+
+func missingTagIDs(tagIDs []uint32, rows []model.Sample) []uint32 {
+	found := make(map[uint32]struct{}, len(rows))
+	for i := range rows {
+		found[rows[i].TagID] = struct{}{}
+	}
+	var missing []uint32
+	seen := make(map[uint32]struct{}, len(tagIDs))
+	for _, id := range tagIDs {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, ok := found[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	return missing
+}
+
+func mergeCHRange(tagIDs []uint32, head, tail []model.Sample) []model.Sample {
+	buckets := make(map[uint32][]model.Sample, len(tagIDs))
+	for _, id := range tagIDs {
+		buckets[id] = nil
+	}
+	for i := range head {
+		head[i].Carried = true
+		buckets[head[i].TagID] = append(buckets[head[i].TagID], head[i])
+	}
+	var extra []model.Sample
+	for i := range tail {
+		id := tail[i].TagID
+		if _, ok := buckets[id]; ok {
+			buckets[id] = append(buckets[id], tail[i])
+		} else {
+			extra = append(extra, tail[i])
+		}
+	}
+	out := make([]model.Sample, 0, len(head)+len(tail))
+	for _, id := range tagIDs {
+		out = append(out, buckets[id]...)
+	}
+	return append(out, extra...)
 }
 
 func (s *ClickHouse) UpsertTags(ctx context.Context, tags []model.Tag) error {
@@ -147,22 +233,6 @@ func scanCH(rows driver.Rows, carried bool) ([]model.Sample, error) {
 		}
 		s.Value = float64(value)
 		s.Carried = carried
-		out = append(out, s)
-	}
-	return out, rows.Err()
-}
-
-func scanCHCarried(rows driver.Rows) ([]model.Sample, error) {
-	var out []model.Sample
-	for rows.Next() {
-		var s model.Sample
-		var value float32
-		var carried uint8
-		if err := rows.Scan(&s.TS, &s.TagID, &value, &s.Quality, &carried); err != nil {
-			return nil, err
-		}
-		s.Value = float64(value)
-		s.Carried = carried != 0
 		out = append(out, s)
 	}
 	return out, rows.Err()

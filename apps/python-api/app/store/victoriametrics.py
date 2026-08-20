@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.models import Sample, Tag
 from app.store.catalog import CatalogMem
@@ -13,6 +13,13 @@ def _http():
     if _HTTP is None or _HTTP.is_closed:
         _HTTP = new_client(timeout=15.0)
     return _HTTP
+
+
+_LOOKBACK = timedelta(hours=2)  # archive max gap is 1h; 370d last_over_time is overkill
+
+
+def _tag_re(tag_ids: list[int]) -> str:
+    return "|".join(str(i) for i in tag_ids)
 
 
 class VictoriaMetricsStore:
@@ -42,52 +49,58 @@ class VictoriaMetricsStore:
         raise_status(resp, "vm write")
 
     async def locf(self, tag_ids: list[int], at: datetime) -> list[Sample]:
-        out: list[Sample] = []
-        for tag_id in tag_ids:
-            resp = await _http().get(
-                f"{self._url}/api/v1/query",
-                params={"query": f'last_over_time(prism_sample{{tag_id="{tag_id}"}}[30d])', "time": int(at.timestamp())},
-            )
-            raise_status(resp, "vm query")
-            for row in resp.json().get("data", {}).get("result", []):
-                ts, raw = row["value"]
-                quality = int(row.get("metric", {}).get("quality") or 0)
-                out.append(
-                    Sample(
-                        ts=datetime.fromtimestamp(float(ts), tz=at.tzinfo),
-                        tag_id=tag_id,
-                        value=float(raw),
-                        quality=quality,
-                    )
-                )
-        return out
+        seed, _ = await self._scan(tag_ids, at - _LOOKBACK, at, at, at, with_mid=False)
+        return seed
 
     async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
-        seed = await self.locf(tag_ids, start)
-        for s in seed:
-            s.carried = True
-        mid: list[Sample] = []
-        for tag_id in tag_ids:
-            resp = await _http().get(
-                f"{self._url}/api/v1/export",
-                params={
-                    "match[]": f'prism_sample{{tag_id="{tag_id}"}}',
-                    "start": int(start.timestamp()),
-                    "end": int(end.timestamp()),
-                },
-            )
-            raise_status(resp, "vm export")
-            for line in resp.text.splitlines():
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                quality = int(row.get("metric", {}).get("quality") or 0)
-                for ts, val in zip(row.get("timestamps") or [], row.get("values") or []):
-                    when = datetime.fromtimestamp(ts / 1000, tz=start.tzinfo)
-                    if when <= start or when > end:
-                        continue
-                    mid.append(Sample(ts=when, tag_id=tag_id, value=float(val), quality=quality))
+        seed, mid = await self._scan(tag_ids, start - _LOOKBACK, end, start, end, with_mid=True)
         return seed + mid
+
+    async def _scan(
+        self,
+        tag_ids: list[int],
+        export_start: datetime,
+        export_end: datetime,
+        from_: datetime,
+        to: datetime,
+        with_mid: bool,
+    ) -> tuple[list[Sample], list[Sample]]:
+        if not tag_ids:
+            return [], []
+        resp = await _http().get(
+            f"{self._url}/api/v1/export",
+            params={
+                "match[]": f'prism_sample{{tag_id=~"{_tag_re(tag_ids)}"}}',
+                "start": int(export_start.timestamp()),
+                "end": int(export_end.timestamp()),
+            },
+        )
+        raise_status(resp, "vm export")
+        best: dict[int, Sample] = {}
+        mid: list[Sample] = []
+        for line in resp.text.splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            metric = row.get("metric") or {}
+            try:
+                tag_id = int(metric.get("tag_id"))
+            except (TypeError, ValueError):
+                continue
+            quality = int(metric.get("quality") or 0)
+            for ts, val in zip(row.get("timestamps") or [], row.get("values") or []):
+                when = datetime.fromtimestamp(ts / 1000, tz=from_.tzinfo)
+                if when <= from_:
+                    prev = best.get(tag_id)
+                    if prev is None or when > prev.ts:
+                        best[tag_id] = Sample(
+                            ts=when, tag_id=tag_id, value=float(val), quality=quality, carried=with_mid
+                        )
+                    continue
+                if with_mid and when <= to:
+                    mid.append(Sample(ts=when, tag_id=tag_id, value=float(val), quality=quality))
+        seed = [best[tag_id] for tag_id in tag_ids if tag_id in best]
+        return seed, mid
 
     async def upsert_tags(self, tags: list[Tag]) -> None:
         self._tags.upsert(tags)

@@ -19,15 +19,6 @@ struct SampleRow {
     quality: u16,
 }
 
-#[derive(Debug, Row, Deserialize)]
-struct SampleRowCarried {
-    ts: i64,
-    tag_id: u32,
-    value: f32,
-    quality: u16,
-    carried: u8,
-}
-
 #[derive(Debug, Row, Serialize, Deserialize)]
 struct TagRow {
     id: u32,
@@ -56,6 +47,48 @@ impl ClickHouse {
         }
         Ok(Self { client })
     }
+
+    async fn locf_query(&self, tag_ids: &[u32], at: DateTime<Utc>, bounded: bool) -> Result<Vec<Sample>> {
+        let bound = if bounded {
+            format!(
+                " AND ts >= toDateTime64('{}', 3, 'UTC') - INTERVAL 2 DAY",
+                ch_time(at)
+            )
+        } else {
+            String::new()
+        };
+        let sql = format!(
+            r#"
+            SELECT toUnixTimestamp64Milli(s.ts) AS ts, toUInt32(s.tag_id) AS tag_id,
+                   toFloat32(s.value) AS value, toUInt16(s.quality) AS quality
+            FROM samples AS s
+            WHERE (s.tag_id, s.ts) IN (
+                SELECT t.tag_id, max(t.ts)
+                FROM samples AS t
+                WHERE t.tag_id IN ({}) AND t.ts <= toDateTime64('{}', 3, 'UTC'){bound}
+                GROUP BY t.tag_id
+            )
+            "#,
+            join_ids(tag_ids),
+            ch_time(at)
+        );
+        let rows = self
+            .client
+            .query(&sql)
+            .fetch_all::<SampleRow>()
+            .await
+            .map_err(StoreError::new)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| Sample {
+                ts: from_millis(r.ts),
+                tag_id: r.tag_id,
+                value: r.value as f64,
+                quality: r.quality,
+                carried: false,
+            })
+            .collect())
+    }
 }
 
 fn ch_time(t: DateTime<Utc>) -> String {
@@ -64,6 +97,48 @@ fn ch_time(t: DateTime<Utc>) -> String {
 
 fn from_millis(ms: i64) -> DateTime<Utc> {
     DateTime::from_timestamp_millis(ms).unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap())
+}
+
+fn missing_tag_ids(tag_ids: &[u32], rows: &[Sample]) -> Vec<u32> {
+    let found: std::collections::HashSet<u32> = rows.iter().map(|s| s.tag_id).collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut missing = Vec::new();
+    for id in tag_ids {
+        if !seen.insert(*id) {
+            continue;
+        }
+        if !found.contains(id) {
+            missing.push(*id);
+        }
+    }
+    missing
+}
+
+fn merge_range(tag_ids: &[u32], head: Vec<Sample>, tail: Vec<Sample>) -> Vec<Sample> {
+    use std::collections::HashMap;
+    let mut buckets: HashMap<u32, Vec<Sample>> = HashMap::new();
+    for id in tag_ids {
+        buckets.entry(*id).or_default();
+    }
+    for sample in head {
+        buckets.entry(sample.tag_id).or_default().push(sample);
+    }
+    let mut extra = Vec::new();
+    for sample in tail {
+        if let Some(bucket) = buckets.get_mut(&sample.tag_id) {
+            bucket.push(sample);
+        } else {
+            extra.push(sample);
+        }
+    }
+    let mut out = Vec::with_capacity(tag_ids.len());
+    for id in tag_ids {
+        if let Some(bucket) = buckets.get_mut(id) {
+            out.append(bucket);
+        }
+    }
+    out.extend(extra);
+    out
 }
 
 #[async_trait]
@@ -103,17 +178,32 @@ impl Store for ClickHouse {
     }
 
     async fn locf(&self, tag_ids: &[u32], at: DateTime<Utc>) -> Result<Vec<Sample>> {
+        let mut out = self.locf_query(tag_ids, at, true).await?;
+        let missing = missing_tag_ids(tag_ids, &out);
+        if !missing.is_empty() {
+            out.extend(self.locf_query(&missing, at, false).await?);
+        }
+        Ok(out)
+    }
+
+    async fn range(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
+        let mut head = self.locf(tag_ids, from).await?;
+        for sample in &mut head {
+            sample.carried = true;
+        }
         let sql = format!(
             r#"
-            SELECT toUnixTimestamp64Milli(ts) AS ts, toUInt32(tag_id) AS tag_id,
-                   toFloat32(value) AS value, toUInt16(quality) AS quality
-            FROM samples
-            WHERE tag_id IN ({}) AND ts <= toDateTime64('{}', 3, 'UTC')
-            ORDER BY tag_id, ts DESC
-            LIMIT 1 BY tag_id
+            SELECT toUnixTimestamp64Milli(s.ts) AS ts, toUInt32(s.tag_id) AS tag_id,
+                   toFloat32(s.value) AS value, toUInt16(s.quality) AS quality
+            FROM samples AS s
+            WHERE s.tag_id IN ({})
+              AND s.ts > toDateTime64('{}', 3, 'UTC')
+              AND s.ts <= toDateTime64('{}', 3, 'UTC')
+            ORDER BY s.tag_id, s.ts
             "#,
             join_ids(tag_ids),
-            ch_time(at)
+            ch_time(from),
+            ch_time(to)
         );
         let rows = self
             .client
@@ -121,7 +211,7 @@ impl Store for ClickHouse {
             .fetch_all::<SampleRow>()
             .await
             .map_err(StoreError::new)?;
-        Ok(rows
+        let tail = rows
             .into_iter()
             .map(|r| Sample {
                 ts: from_millis(r.ts),
@@ -130,50 +220,8 @@ impl Store for ClickHouse {
                 quality: r.quality,
                 carried: false,
             })
-            .collect())
-    }
-
-    async fn range(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let ids = join_ids(tag_ids);
-        let sql = format!(
-            r#"
-            SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT toUnixTimestamp64Milli(ts) AS ts, toUInt32(tag_id) AS tag_id,
-                       toFloat32(value) AS value, toUInt16(quality) AS quality, 1 AS carried
-                FROM samples
-                WHERE tag_id IN ({ids}) AND ts <= toDateTime64('{}', 3, 'UTC')
-                ORDER BY tag_id, ts DESC
-                LIMIT 1 BY tag_id
-                UNION ALL
-                SELECT toUnixTimestamp64Milli(ts) AS ts, toUInt32(tag_id) AS tag_id,
-                       toFloat32(value) AS value, toUInt16(quality) AS quality, 0
-                FROM samples
-                WHERE tag_id IN ({ids})
-                  AND ts > toDateTime64('{}', 3, 'UTC')
-                  AND ts <= toDateTime64('{}', 3, 'UTC')
-            )
-            ORDER BY tag_id, ts
-            "#,
-            ch_time(from),
-            ch_time(from),
-            ch_time(to)
-        );
-        let rows = self
-            .client
-            .query(&sql)
-            .fetch_all::<SampleRowCarried>()
-            .await
-            .map_err(StoreError::new)?;
-        Ok(rows
-            .into_iter()
-            .map(|r| Sample {
-                ts: from_millis(r.ts),
-                tag_id: r.tag_id,
-                value: r.value as f64,
-                quality: r.quality,
-                carried: r.carried != 0,
-            })
-            .collect())
+            .collect();
+        Ok(merge_range(tag_ids, head, tail))
     }
 
     async fn upsert_tags(&self, tags: &[Tag]) -> Result<()> {

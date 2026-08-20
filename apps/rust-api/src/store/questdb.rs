@@ -1,14 +1,16 @@
 use std::fmt::Write as _;
+use std::fmt;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use url::Url;
 
-use super::{append_ilp_float, http_client, join_ids, Result, Store, StoreError};
+use super::{append_ilp_float, http_client, Result, Store, StoreError};
 use crate::model::{Sample, Tag};
 
 pub struct QuestDb {
@@ -25,6 +27,16 @@ struct QdbExec {
     #[serde(default)]
     error: String,
 }
+
+#[derive(Deserialize)]
+struct QdbSampleExec {
+    #[serde(default)]
+    dataset: Vec<QdbSample>,
+    #[serde(default)]
+    error: String,
+}
+
+struct QdbSample(Sample);
 
 impl QuestDb {
     pub fn new(http_url: &str, ilp_addr: &str) -> Self {
@@ -67,19 +79,62 @@ impl QuestDb {
     }
 
     async fn exec(&self, query: &str) -> Result<QdbExec> {
+        Ok(self.exec_json(query).await?)
+    }
+
+    async fn exec_samples(&self, query: &str) -> Result<Vec<Sample>> {
+        let out: QdbSampleExec = self.exec_json(query).await?;
+        Ok(out.dataset.into_iter().map(|row| row.0).collect())
+    }
+
+    async fn exec_json<T>(&self, query: &str) -> Result<T>
+    where
+        T: for<'de> Deserialize<'de> + QdbError,
+    {
         let mut u = Url::parse(&format!("{}/exec", self.base))?;
         u.query_pairs_mut().append_pair("query", query);
-        let resp = self.client.get(u).send().await?;
-        let out: QdbExec = resp.json().await?;
-        if !out.error.is_empty() {
-            return Err(StoreError::new(format!("questdb: {}", out.error)));
+        let bytes = self.client.get(u).send().await?.bytes().await?;
+        let out: T = serde_json::from_slice(&bytes).map_err(StoreError::new)?;
+        if let Some(err) = out.qdb_error() {
+            return Err(StoreError::new(format!("questdb: {err}")));
         }
         Ok(out)
     }
 }
 
+trait QdbError {
+    fn qdb_error(&self) -> Option<&str>;
+}
+
+impl QdbError for QdbExec {
+    fn qdb_error(&self) -> Option<&str> {
+        if self.error.is_empty() {
+            None
+        } else {
+            Some(&self.error)
+        }
+    }
+}
+
+impl QdbError for QdbSampleExec {
+    fn qdb_error(&self) -> Option<&str> {
+        if self.error.is_empty() {
+            None
+        } else {
+            Some(&self.error)
+        }
+    }
+}
+
 fn qdb_time(t: DateTime<Utc>) -> String {
     t.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
+}
+
+fn join_symbol_ids(ids: &[u32]) -> String {
+    ids.iter()
+        .map(|id| format!("'{id}'"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn as_f64(v: &serde_json::Value) -> f64 {
@@ -97,53 +152,167 @@ fn as_f64(v: &serde_json::Value) -> f64 {
     }
 }
 
-fn as_bool(v: &serde_json::Value) -> bool {
-    match v {
-        serde_json::Value::Bool(b) => *b,
-        serde_json::Value::Number(n) => n.as_f64().unwrap_or(0.0) != 0.0,
-        serde_json::Value::String(s) => matches!(s.as_str(), "true" | "t" | "1"),
-        _ => false,
+fn parse_qdb_ts_str(s: &str) -> std::result::Result<DateTime<Utc>, ()> {
+    if let Ok(n) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ") {
+        return Ok(n.and_utc());
+    }
+    DateTime::parse_from_rfc3339(s)
+        .map(|t| t.with_timezone(&Utc))
+        .map_err(|_| ())
+}
+
+impl<'de> Deserialize<'de> for QdbSample {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        deserializer.deserialize_seq(QdbSampleVisitor)
     }
 }
 
-fn parse_qdb_ts(v: &serde_json::Value) -> Result<DateTime<Utc>> {
-    match v {
-        serde_json::Value::String(s) => {
-            if let Ok(n) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ") {
-                return Ok(n.and_utc());
-            }
-            DateTime::parse_from_rfc3339(s)
-                .map(|t| t.with_timezone(&Utc))
-                .map_err(|_| StoreError::new(format!("questdb ts {s}")))
-        }
-        serde_json::Value::Number(n) => {
-            let ms = n.as_f64().unwrap_or(0.0) as i64;
-            DateTime::from_timestamp_millis(ms).ok_or_else(|| StoreError::new("questdb ts millis"))
-        }
-        other => Err(StoreError::new(format!("questdb ts {other}"))),
-    }
-}
+struct QdbSampleVisitor;
 
-fn parse_samples(data: QdbExec, has_carried: bool) -> Result<Vec<Sample>> {
-    let mut out = Vec::new();
-    for row in data.dataset {
-        if row.len() < 4 {
-            continue;
-        }
-        let ts = parse_qdb_ts(&row[0])?;
-        let mut s = Sample {
-            ts,
-            tag_id: as_f64(&row[1]) as u32,
-            value: as_f64(&row[2]),
-            quality: as_f64(&row[3]) as u16,
-            carried: false,
+impl<'de> Visitor<'de> for QdbSampleVisitor {
+    type Value = QdbSample;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("questdb sample row")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<QdbSample, A::Error> {
+        let ts = match seq.next_element::<TsCell>()? {
+            Some(cell) => cell.0,
+            None => return Err(de::Error::invalid_length(0, &self)),
         };
-        if has_carried && row.len() > 4 {
-            s.carried = as_bool(&row[4]);
-        }
-        out.push(s);
+        let tag_id = match seq.next_element::<U32Cell>()? {
+            Some(cell) => cell.0,
+            None => return Err(de::Error::invalid_length(1, &self)),
+        };
+        let value = match seq.next_element::<F64Cell>()? {
+            Some(cell) => cell.0,
+            None => return Err(de::Error::invalid_length(2, &self)),
+        };
+        let quality = match seq.next_element::<U32Cell>()? {
+            Some(cell) => cell.0 as u16,
+            None => return Err(de::Error::invalid_length(3, &self)),
+        };
+        let carried = seq.next_element::<BoolCell>()?.map(|c| c.0).unwrap_or(false);
+        Ok(QdbSample(Sample {
+            ts,
+            tag_id,
+            value,
+            quality,
+            carried,
+        }))
     }
-    Ok(out)
+}
+
+struct TsCell(DateTime<Utc>);
+struct U32Cell(u32);
+struct F64Cell(f64);
+struct BoolCell(bool);
+
+impl<'de> Deserialize<'de> for TsCell {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        deserializer.deserialize_any(TsCellVisitor)
+    }
+}
+
+struct TsCellVisitor;
+impl<'de> Visitor<'de> for TsCellVisitor {
+    type Value = TsCell;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("timestamp")
+    }
+    fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<TsCell, E> {
+        parse_qdb_ts_str(v).map(TsCell).map_err(|_| E::custom(v))
+    }
+    fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<TsCell, E> {
+        DateTime::from_timestamp_millis(v)
+            .map(TsCell)
+            .ok_or_else(|| E::custom("ts millis"))
+    }
+    fn visit_u64<E: de::Error>(self, v: u64) -> std::result::Result<TsCell, E> {
+        self.visit_i64(v as i64)
+    }
+    fn visit_f64<E: de::Error>(self, v: f64) -> std::result::Result<TsCell, E> {
+        self.visit_i64(v as i64)
+    }
+}
+
+impl<'de> Deserialize<'de> for U32Cell {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        deserializer.deserialize_any(U32CellVisitor)
+    }
+}
+
+struct U32CellVisitor;
+impl<'de> Visitor<'de> for U32CellVisitor {
+    type Value = U32Cell;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("u32")
+    }
+    fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<U32Cell, E> {
+        v.parse().map(U32Cell).map_err(E::custom)
+    }
+    fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<U32Cell, E> {
+        Ok(U32Cell(v as u32))
+    }
+    fn visit_u64<E: de::Error>(self, v: u64) -> std::result::Result<U32Cell, E> {
+        Ok(U32Cell(v as u32))
+    }
+    fn visit_f64<E: de::Error>(self, v: f64) -> std::result::Result<U32Cell, E> {
+        Ok(U32Cell(v as u32))
+    }
+}
+
+impl<'de> Deserialize<'de> for F64Cell {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        deserializer.deserialize_any(F64CellVisitor)
+    }
+}
+
+struct F64CellVisitor;
+impl<'de> Visitor<'de> for F64CellVisitor {
+    type Value = F64Cell;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("f64")
+    }
+    fn visit_f64<E: de::Error>(self, v: f64) -> std::result::Result<F64Cell, E> {
+        Ok(F64Cell(v))
+    }
+    fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<F64Cell, E> {
+        Ok(F64Cell(v as f64))
+    }
+    fn visit_u64<E: de::Error>(self, v: u64) -> std::result::Result<F64Cell, E> {
+        Ok(F64Cell(v as f64))
+    }
+    fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<F64Cell, E> {
+        v.parse().map(F64Cell).map_err(E::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for BoolCell {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        deserializer.deserialize_any(BoolCellVisitor)
+    }
+}
+
+struct BoolCellVisitor;
+impl<'de> Visitor<'de> for BoolCellVisitor {
+    type Value = BoolCell;
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("bool")
+    }
+    fn visit_bool<E: de::Error>(self, v: bool) -> std::result::Result<BoolCell, E> {
+        Ok(BoolCell(v))
+    }
+    fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<BoolCell, E> {
+        Ok(BoolCell(v != 0))
+    }
+    fn visit_u64<E: de::Error>(self, v: u64) -> std::result::Result<BoolCell, E> {
+        Ok(BoolCell(v != 0))
+    }
+    fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<BoolCell, E> {
+        Ok(BoolCell(matches!(v, "true" | "t" | "1")))
+    }
 }
 
 fn append_ilp_line(buf: &mut String, p: &Sample) {
@@ -164,6 +333,12 @@ impl Store for QuestDb {
     }
 
     async fn ping(&self) -> Result<()> {
+        self.exec(
+            "CREATE TABLE IF NOT EXISTS samples (ts TIMESTAMP, tag_id SYMBOL CAPACITY 256 CACHE INDEX, value FLOAT, quality SHORT) timestamp(ts) PARTITION BY DAY WAL",
+        )
+        .await?;
+        self.exec("CREATE TABLE IF NOT EXISTS tags (id INT, name SYMBOL, unit SYMBOL)")
+            .await?;
         self.exec("SELECT 1").await?;
         Ok(())
     }
@@ -182,14 +357,14 @@ impl Store for QuestDb {
     async fn locf(&self, tag_ids: &[u32], at: DateTime<Utc>) -> Result<Vec<Sample>> {
         let q = format!(
             "SELECT ts, tag_id, value, quality FROM samples WHERE tag_id IN ({}) AND ts <= '{}' LATEST ON ts PARTITION BY tag_id",
-            join_ids(tag_ids),
+            join_symbol_ids(tag_ids),
             qdb_time(at)
         );
-        parse_samples(self.exec(&q).await?, false)
+        self.exec_samples(&q).await
     }
 
     async fn range(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let ids = join_ids(tag_ids);
+        let ids = join_symbol_ids(tag_ids);
         let q = format!(
             r#"
             SELECT ts, tag_id, value, quality, carried FROM (
@@ -202,13 +377,12 @@ impl Store for QuestDb {
                 FROM samples
                 WHERE tag_id IN ({ids}) AND ts > '{}' AND ts <= '{}'
             )
-            ORDER BY tag_id, ts
             "#,
             qdb_time(from),
             qdb_time(from),
             qdb_time(to)
         );
-        parse_samples(self.exec(&q).await?, true)
+        self.exec_samples(&q).await
     }
 
     async fn upsert_tags(&self, tags: &[Tag]) -> Result<()> {

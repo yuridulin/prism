@@ -92,85 +92,83 @@ func (s *VictoriaMetrics) Write(ctx context.Context, samples []model.Sample) err
 }
 
 func (s *VictoriaMetrics) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
-	var out []model.Sample
-	for _, id := range tagIDs {
-		params := url.Values{}
-		params.Set("query", fmt.Sprintf(`last_over_time(prism_sample{tag_id="%d"}[30d])`, id))
-		params.Set("time", strconv.FormatInt(at.UTC().Unix(), 10))
-		var parsed vmInstantResponse
-		if err := s.getJSON(ctx, "/api/v1/query?"+params.Encode(), &parsed); err != nil {
-			return nil, err
-		}
-		if len(parsed.Data.Result) == 0 {
-			continue
-		}
-		sample := parsed.Data.Result[0]
-		ts, _ := sample.Value[0].(float64)
-		raw, _ := sample.Value[1].(string)
-		val, _ := strconv.ParseFloat(raw, 64)
-		q := uint16(0)
-		if v, ok := sample.Metric["quality"]; ok {
-			n, _ := strconv.Atoi(v)
-			q = uint16(n)
-		}
-		out = append(out, model.Sample{TS: time.Unix(int64(ts), 0).UTC(), TagID: id, Value: val, Quality: q})
-	}
-	return out, nil
+	at = at.UTC()
+	seed, _, err := s.scanExport(ctx, tagIDs, at.Add(-vmLookback), at, at, at, false)
+	return seed, err
 }
 
 func (s *VictoriaMetrics) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
-	seed, err := s.Locf(ctx, tagIDs, from)
+	from, to = from.UTC(), to.UTC()
+	seed, mid, err := s.scanExport(ctx, tagIDs, from.Add(-vmLookback), to, from, to, true)
 	if err != nil {
 		return nil, err
 	}
-	for i := range seed {
-		seed[i].Carried = true
+	return append(seed, mid...), nil
+}
+
+// scanExport pulls raw samples in one /api/v1/export call.
+// Archive max gap is 1h (hourly tags); 2h lookback is enough for locf at 364d ago.
+// last_over_time timestamps are the evaluation time, so export is used for the real sample ts.
+func (s *VictoriaMetrics) scanExport(ctx context.Context, tagIDs []uint32, start, end, from, to time.Time, withMid bool) ([]model.Sample, []model.Sample, error) {
+	if len(tagIDs) == 0 {
+		return nil, nil, nil
 	}
+	params := url.Values{}
+	params.Set("match[]", fmt.Sprintf(`prism_sample{tag_id=~"%s"}`, vmTagRE(tagIDs)))
+	params.Set("start", strconv.FormatInt(start.Unix(), 10))
+	params.Set("end", strconv.FormatInt(end.Unix(), 10))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/api/v1/export?"+params.Encode(), nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer closeHTTP(resp)
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, nil, fmt.Errorf("vm export status %d: %s", resp.StatusCode, body)
+	}
+
+	best := make(map[uint32]model.Sample, len(tagIDs))
 	var mid []model.Sample
-	for _, id := range tagIDs {
-		params := url.Values{}
-		params.Set("match[]", fmt.Sprintf(`prism_sample{tag_id="%d"}`, id))
-		params.Set("start", strconv.FormatInt(from.UTC().Unix(), 10))
-		params.Set("end", strconv.FormatInt(to.UTC().Unix(), 10))
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/api/v1/export?"+params.Encode(), nil)
-		if err != nil {
-			return nil, err
+	dec := json.NewDecoder(resp.Body)
+	for dec.More() {
+		var row vmExportRow
+		if err := dec.Decode(&row); err != nil {
+			return nil, nil, err
 		}
-		resp, err := s.client.Do(req)
-		if err != nil {
-			return nil, err
+		id, ok := vmMetricTagID(row.Metric)
+		if !ok {
+			continue
 		}
-		dec := json.NewDecoder(resp.Body)
-		for dec.More() {
-			var row struct {
-				Metric     map[string]string `json:"metric"`
-				Timestamps []int64           `json:"timestamps"`
-				Values     []float64         `json:"values"`
+		q := vmMetricQuality(row.Metric)
+		for i, ts := range row.Timestamps {
+			t := time.UnixMilli(ts).UTC()
+			val := 0.0
+			if i < len(row.Values) {
+				val = row.Values[i]
 			}
-			if err := dec.Decode(&row); err != nil {
-				closeHTTP(resp)
-				return nil, err
-			}
-			q := uint16(0)
-			if v, ok := row.Metric["quality"]; ok {
-				n, _ := strconv.Atoi(v)
-				q = uint16(n)
-			}
-			for i, ts := range row.Timestamps {
-				t := time.UnixMilli(ts).UTC()
-				if !t.After(from) || t.After(to) {
-					continue
+			if !t.After(from) {
+				if prev, ok := best[id]; !ok || t.After(prev.TS) {
+					best[id] = model.Sample{TS: t, TagID: id, Value: val, Quality: q, Carried: withMid}
 				}
-				val := 0.0
-				if i < len(row.Values) {
-					val = row.Values[i]
-				}
+				continue
+			}
+			if withMid && !t.After(to) {
 				mid = append(mid, model.Sample{TS: t, TagID: id, Value: val, Quality: q})
 			}
 		}
-		closeHTTP(resp)
 	}
-	return append(seed, mid...), nil
+
+	seed := make([]model.Sample, 0, len(tagIDs))
+	for _, id := range tagIDs {
+		if sample, ok := best[id]; ok {
+			seed = append(seed, sample)
+		}
+	}
+	return seed, mid, nil
 }
 
 func (s *VictoriaMetrics) UpsertTags(_ context.Context, tags []model.Tag) error {
@@ -182,28 +180,39 @@ func (s *VictoriaMetrics) ListTags(_ context.Context) ([]model.Tag, error) {
 	return s.tags.list(), nil
 }
 
-func (s *VictoriaMetrics) getJSON(ctx context.Context, path string, dest any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+path, nil)
-	if err != nil {
-		return err
+const vmLookback = 2 * time.Hour
+
+func vmTagRE(ids []uint32) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatUint(uint64(id), 10)
 	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer closeHTTP(resp)
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("vm query status %d: %s", resp.StatusCode, body)
-	}
-	return json.NewDecoder(resp.Body).Decode(dest)
+	return strings.Join(parts, "|")
 }
 
-type vmInstantResponse struct {
-	Data struct {
-		Result []struct {
-			Metric map[string]string `json:"metric"`
-			Value  []any             `json:"value"`
-		} `json:"result"`
-	} `json:"data"`
+func vmMetricTagID(metric map[string]string) (uint32, bool) {
+	raw, ok := metric["tag_id"]
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return uint32(n), true
+}
+
+func vmMetricQuality(metric map[string]string) uint16 {
+	v, ok := metric["quality"]
+	if !ok {
+		return 0
+	}
+	n, _ := strconv.Atoi(v)
+	return uint16(n)
+}
+
+type vmExportRow struct {
+	Metric     map[string]string `json:"metric"`
+	Timestamps []int64           `json:"timestamps"`
+	Values     []float64         `json:"values"`
 }

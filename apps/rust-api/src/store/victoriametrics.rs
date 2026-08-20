@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use url::Url;
 
@@ -16,24 +17,8 @@ pub struct VictoriaMetrics {
 }
 
 #[derive(Debug, Deserialize)]
-struct VmInstantResponse {
-    data: VmData,
-}
-
-#[derive(Debug, Deserialize)]
-struct VmData {
-    result: Vec<VmInstant>,
-}
-
-#[derive(Debug, Deserialize)]
-struct VmInstant {
-    metric: std::collections::HashMap<String, String>,
-    value: Vec<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
 struct VmExportRow {
-    metric: std::collections::HashMap<String, String>,
+    metric: HashMap<String, String>,
     timestamps: Vec<i64>,
     values: Vec<f64>,
 }
@@ -53,22 +38,93 @@ impl VictoriaMetrics {
         }
     }
 
-    async fn get_json<T: serde::de::DeserializeOwned>(&self, path_and_query: &str) -> Result<T> {
-        let resp = self
-            .client
-            .get(format!("{}{path_and_query}", self.base))
-            .send()
-            .await?;
-        let status = resp.status();
-        if status.as_u16() >= 300 {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(StoreError::new(format!("vm query {status}: {text}")));
+    fn tag_re(ids: &[u32]) -> String {
+        let mut out = String::new();
+        for (i, id) in ids.iter().enumerate() {
+            if i > 0 {
+                out.push('|');
+            }
+            let _ = write!(out, "{id}");
         }
-        Ok(resp.json().await?)
+        out
+    }
+
+    async fn scan(
+        &self,
+        tag_ids: &[u32],
+        export_start: DateTime<Utc>,
+        export_end: DateTime<Utc>,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        with_mid: bool,
+    ) -> Result<(Vec<Sample>, Vec<Sample>)> {
+        if tag_ids.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let mut u = Url::parse(&format!("{}/api/v1/export", self.base))?;
+        u.query_pairs_mut()
+            .append_pair("match[]", &format!(r#"prism_sample{{tag_id=~"{}"}}"#, Self::tag_re(tag_ids)))
+            .append_pair("start", &export_start.timestamp().to_string())
+            .append_pair("end", &export_end.timestamp().to_string());
+        let resp = self.client.get(u).send().await?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if status.as_u16() >= 300 {
+            return Err(StoreError::new(format!("vm export {status}: {text}")));
+        }
+
+        let mut best: HashMap<u32, Sample> = HashMap::new();
+        let mut mid = Vec::new();
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let row: VmExportRow = serde_json::from_str(line)
+                .map_err(|e| StoreError::new(format!("vm export json: {e}")))?;
+            let Some(id) = row.metric.get("tag_id").and_then(|v| v.parse().ok()) else {
+                continue;
+            };
+            let q = quality_from(&row.metric);
+            for (i, ts) in row.timestamps.iter().enumerate() {
+                let t = DateTime::from_timestamp_millis(*ts)
+                    .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap());
+                let val = row.values.get(i).copied().unwrap_or(0.0);
+                if t <= from {
+                    let better = best.get(&id).map(|prev| t > prev.ts).unwrap_or(true);
+                    if better {
+                        best.insert(
+                            id,
+                            Sample {
+                                ts: t,
+                                tag_id: id,
+                                value: val,
+                                quality: q,
+                                carried: with_mid,
+                            },
+                        );
+                    }
+                    continue;
+                }
+                if with_mid && t <= to {
+                    mid.push(Sample {
+                        ts: t,
+                        tag_id: id,
+                        value: val,
+                        quality: q,
+                        carried: false,
+                    });
+                }
+            }
+        }
+        let seed = tag_ids
+            .iter()
+            .filter_map(|id| best.remove(id))
+            .collect();
+        Ok((seed, mid))
     }
 }
 
-fn quality_from(metric: &std::collections::HashMap<String, String>) -> u16 {
+fn quality_from(metric: &HashMap<String, String>) -> u16 {
     metric
         .get("quality")
         .and_then(|v| v.parse().ok())
@@ -109,82 +165,17 @@ impl Store for VictoriaMetrics {
     }
 
     async fn locf(&self, tag_ids: &[u32], at: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let mut out = Vec::new();
-        for id in tag_ids {
-            let mut params = Url::parse("http://vm.local/api/v1/query")?;
-            params.query_pairs_mut()
-                .append_pair("query", &format!(r#"last_over_time(prism_sample{{tag_id="{id}"}}[30d])"#))
-                .append_pair("time", &at.timestamp().to_string());
-            let parsed: VmInstantResponse = self
-                .get_json(&format!("/api/v1/query?{}", params.query().unwrap_or("")))
-                .await?;
-            let Some(sample) = parsed.data.result.first() else {
-                continue;
-            };
-            let ts = sample
-                .value
-                .first()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0) as i64;
-            let val = sample
-                .value
-                .get(1)
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
-            out.push(Sample {
-                ts: DateTime::from_timestamp(ts, 0).unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap()),
-                tag_id: *id,
-                value: val,
-                quality: quality_from(&sample.metric),
-                carried: false,
-            });
-        }
-        Ok(out)
+        // Archive max gap is 1h; 2h lookback is enough even at 364d ago.
+        let (seed, _) = self
+            .scan(tag_ids, at - Duration::hours(2), at, at, at, false)
+            .await?;
+        Ok(seed)
     }
 
     async fn range(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let mut seed = self.locf(tag_ids, from).await?;
-        for s in &mut seed {
-            s.carried = true;
-        }
-        let mut mid = Vec::new();
-        for id in tag_ids {
-            let mut u = Url::parse(&format!("{}/api/v1/export", self.base))?;
-            u.query_pairs_mut()
-                .append_pair("match[]", &format!(r#"prism_sample{{tag_id="{id}"}}"#))
-                .append_pair("start", &from.timestamp().to_string())
-                .append_pair("end", &to.timestamp().to_string());
-            let resp = self.client.get(u).send().await?;
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            if status.as_u16() >= 300 {
-                return Err(StoreError::new(format!("vm export {status}: {text}")));
-            }
-            for line in text.lines() {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let row: VmExportRow = serde_json::from_str(line)
-                    .map_err(|e| StoreError::new(format!("vm export json: {e}")))?;
-                let q = quality_from(&row.metric);
-                for (i, ts) in row.timestamps.iter().enumerate() {
-                    let t = DateTime::from_timestamp_millis(*ts)
-                        .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap());
-                    if t <= from || t > to {
-                        continue;
-                    }
-                    let val = row.values.get(i).copied().unwrap_or(0.0);
-                    mid.push(Sample {
-                        ts: t,
-                        tag_id: *id,
-                        value: val,
-                        quality: q,
-                        carried: false,
-                    });
-                }
-            }
-        }
+        let (mut seed, mid) = self
+            .scan(tag_ids, from - Duration::hours(2), to, from, to, true)
+            .await?;
         seed.extend(mid);
         Ok(seed)
     }

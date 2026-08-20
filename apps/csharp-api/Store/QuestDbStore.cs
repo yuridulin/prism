@@ -23,7 +23,12 @@ public sealed class QuestDbStore : IStore
 
     public string Name => "questdb";
 
-    public Task PingAsync(CancellationToken ct = default) => Exec(ct, "SELECT 1").AsTask();
+    public async Task PingAsync(CancellationToken ct = default)
+    {
+        await Exec(ct, "CREATE TABLE IF NOT EXISTS samples (ts TIMESTAMP, tag_id SYMBOL CAPACITY 256 CACHE INDEX, value FLOAT, quality SHORT) timestamp(ts) PARTITION BY DAY WAL");
+        await Exec(ct, "CREATE TABLE IF NOT EXISTS tags (id INT, name SYMBOL, unit SYMBOL)");
+        await Exec(ct, "SELECT 1");
+    }
 
     public async Task WriteAsync(IReadOnlyList<Sample> samples, CancellationToken ct = default)
     {
@@ -52,14 +57,14 @@ public sealed class QuestDbStore : IStore
     public async Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default)
     {
         var q =
-            $"SELECT ts, tag_id, value, quality FROM samples WHERE tag_id IN ({StoreUtil.JoinIds(tagIds)}) AND ts <= '{StoreUtil.QuestDbTime(at)}' LATEST ON ts PARTITION BY tag_id";
+            $"SELECT ts, tag_id, value, quality FROM samples WHERE tag_id IN ({JoinSymbols(tagIds)}) AND ts <= '{StoreUtil.QuestDbTime(at)}' LATEST ON ts PARTITION BY tag_id";
         var data = await Exec(ct, q);
         return ParseSamples(data, hasCarried: false);
     }
 
     public async Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
     {
-        var ids = StoreUtil.JoinIds(tagIds);
+        var ids = JoinSymbols(tagIds);
         var q = $"""
             SELECT ts, tag_id, value, quality, carried FROM (
                 SELECT ts, tag_id, value, quality, true AS carried
@@ -71,7 +76,6 @@ public sealed class QuestDbStore : IStore
                 FROM samples
                 WHERE tag_id IN ({ids}) AND ts > '{StoreUtil.QuestDbTime(from)}' AND ts <= '{StoreUtil.QuestDbTime(to)}'
             )
-            ORDER BY tag_id, ts
             """;
         var data = await Exec(ct, q);
         return ParseSamples(data, hasCarried: true);
@@ -114,6 +118,24 @@ public sealed class QuestDbStore : IStore
         _http.Dispose();
         _ilp.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    private static string JoinSymbols(IReadOnlyList<uint> ids)
+    {
+        var sb = new StringBuilder(ids.Count * 4);
+        for (var i = 0; i < ids.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(',');
+            }
+
+            sb.Append('\'');
+            sb.Append(ids[i].ToString(CultureInfo.InvariantCulture));
+            sb.Append('\'');
+        }
+
+        return sb.ToString();
     }
 
     private async ValueTask<QuestDbExec> Exec(CancellationToken ct, string query)

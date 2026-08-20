@@ -66,10 +66,15 @@ public sealed class TimescaleStore : IStore
         await using var conn = await Open(ct);
         await using var cmd = new NpgsqlCommand(
             """
-            SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality
-            FROM samples
-            WHERE tag_id = ANY($1) AND ts <= $2
-            ORDER BY tag_id, ts DESC
+            SELECT s.ts, s.tag_id, s.value, s.quality
+            FROM unnest($1::int4[]) AS t(tag_id)
+            CROSS JOIN LATERAL (
+                SELECT ts, tag_id, value, quality
+                FROM samples
+                WHERE samples.tag_id = t.tag_id AND ts <= $2
+                ORDER BY ts DESC
+                LIMIT 1
+            ) s
             """, conn);
         cmd.Parameters.Add(new NpgsqlParameter { Value = StoreUtil.IntTags(tagIds) });
         cmd.Parameters.Add(new NpgsqlParameter { Value = at.UtcDateTime });
@@ -83,15 +88,20 @@ public sealed class TimescaleStore : IStore
         await using var cmd = new NpgsqlCommand(
             """
             SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT DISTINCT ON (tag_id) ts, tag_id, value, quality, true AS carried
-                FROM samples
-                WHERE tag_id = ANY($1) AND ts <= $2
-                ORDER BY tag_id, ts DESC
+                SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
+                FROM unnest($1::int4[]) AS t(tag_id)
+                CROSS JOIN LATERAL (
+                    SELECT ts, tag_id, value, quality
+                    FROM samples
+                    WHERE samples.tag_id = t.tag_id AND ts <= $2
+                    ORDER BY ts DESC
+                    LIMIT 1
+                ) s
                 UNION ALL
                 SELECT ts, tag_id, value, quality, false
                 FROM samples
                 WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-            ) s
+            ) q
             ORDER BY tag_id, ts
             """, conn);
         var ids = StoreUtil.IntTags(tagIds);

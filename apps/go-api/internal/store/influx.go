@@ -105,11 +105,11 @@ func appendInfluxLine(buf *bytes.Buffer, p *model.Sample) {
 }
 
 func (s *Influx) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
-	return s.queryLast(ctx, tagIDs, time.Time{}, at.UTC(), false)
+	return s.queryLast(ctx, tagIDs, at.UTC(), false)
 }
 
 func (s *Influx) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
-	seed, err := s.queryLast(ctx, tagIDs, time.Time{}, from.UTC(), true)
+	seed, err := s.queryLast(ctx, tagIDs, from.UTC(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -120,20 +120,18 @@ func (s *Influx) Range(ctx context.Context, tagIDs []uint32, from, to time.Time)
 	return append(seed, mid...), nil
 }
 
-func (s *Influx) queryLast(ctx context.Context, tagIDs []uint32, start, stop time.Time, carried bool) ([]model.Sample, error) {
-	startRaw := "-30d"
-	if !start.IsZero() {
-		startRaw = start.Format(time.RFC3339Nano)
-	}
+// Archive max gap is 1h; 3h still finds the previous minute/hour point at 364d ago.
+const influxLocfLookback = 3 * time.Hour
+
+func (s *Influx) queryLast(ctx context.Context, tagIDs []uint32, stop time.Time, carried bool) ([]model.Sample, error) {
 	flux := fmt.Sprintf(`
 from(bucket: %q)
   |> range(start: %s, stop: %s)
   |> filter(fn: (r) => r._measurement == "samples")
   |> filter(fn: (r) => %s)
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> group(columns: ["tag_id"])
   |> last()
-`, s.bucket, startRaw, stop.Format(time.RFC3339Nano), influxTagFilter(tagIDs))
+  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+`, s.bucket, stop.Add(-influxLocfLookback).Format(time.RFC3339Nano), stop.Add(time.Nanosecond).Format(time.RFC3339Nano), influxTagFilter(tagIDs))
 	return s.collect(ctx, flux, carried)
 }
 
