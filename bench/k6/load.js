@@ -81,13 +81,13 @@ function pickMix() {
 }
 
 function windowMs(raw) {
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(raw || "15m");
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(raw || "15m");
   if (!match) {
     return 15 * 60 * 1000;
   }
   const amount = Number(match[1]);
   const unit = match[2];
-  const mul = { ms: 1, s: 1000, m: 60000, h: 3600000 }[unit];
+  const mul = { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000 }[unit];
   return amount * mul;
 }
 

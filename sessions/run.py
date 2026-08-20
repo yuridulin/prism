@@ -21,6 +21,7 @@ from session import (  # noqa: E402
     API_META,
     API_READY,
     API_SERVICE,
+    LAB_ARCHIVE_END,
     SessionError,
     build_comparison,
     draft_conclusions,
@@ -42,6 +43,14 @@ from session import (  # noqa: E402
 )
 
 COMPOSE_FILES = ["-f", "docker-compose.yml", "-f", "docker-compose.session.yml"]
+
+STORAGE_DATA_PATH = {
+    "timescaledb": "/var/lib/postgresql/data",
+    "clickhouse": "/var/lib/clickhouse",
+    "questdb": "/var/lib/questdb",
+    "influxdb": "/var/lib/influxdb2",
+    "victoriametrics": "/victoria-metrics-data",
+}
 
 
 def compose(
@@ -160,6 +169,65 @@ def collect_prometheus(window: str, backend: str, storage: str) -> list[dict]:
     ]
 
 
+def collect_storage_size(pair: dict, env_file: Path | None) -> dict:
+    storage = pair["storage"]
+    dest = STORAGE_DATA_PATH.get(storage)
+    if not dest:
+        return {"error": f"no data path for {storage}"}
+    proc = compose(["ps", "-q", storage], env_file)
+    cid = (proc.stdout or "").strip().splitlines()
+    cid = cid[0] if cid else ""
+    if not cid:
+        return {"error": f"no container for {storage}"}
+    inspect = subprocess.run(
+        ["docker", "inspect", cid, "--format", "{{json .Mounts}}"],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if inspect.returncode != 0:
+        return {"error": (inspect.stderr or inspect.stdout or "").strip()}
+    try:
+        mounts = json.loads(inspect.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        return {"error": f"inspect mounts: {exc}"}
+    volume = None
+    source = None
+    for mount in mounts:
+        if mount.get("Destination") == dest:
+            volume = mount.get("Name") or ""
+            source = mount.get("Source") or ""
+            break
+    if not volume and not source:
+        return {"error": f"no mount at {dest}", "mounts": mounts}
+    bind = f"{volume}:/measure:ro" if volume else f"{source}:/measure:ro"
+    du = subprocess.run(
+        ["docker", "run", "--rm", "-v", bind, "alpine:3.20", "du", "-sb", "/measure"],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if du.returncode != 0:
+        return {
+            "error": (du.stderr or du.stdout or "").strip(),
+            "volume": volume or None,
+            "path": dest,
+        }
+    raw = (du.stdout or "").strip().split()
+    try:
+        nbytes = int(raw[0])
+    except (IndexError, ValueError):
+        return {"error": f"du output {du.stdout!r}", "volume": volume or None, "path": dest}
+    return {
+        "bytes": nbytes,
+        "mib": round(nbytes / (1024 * 1024), 1),
+        "volume": volume or None,
+        "path": dest,
+    }
+
+
 def collect_docker_stats(pair: dict) -> dict:
     proc = subprocess.run(
         ["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"],
@@ -209,21 +277,35 @@ def run_pair(session: dict, pair: dict) -> dict:
     work = pair_dir(session["id"], pair)
     env_file = write_compose_env(session, pair)
     services = pair_services(pair)
+    keep = bool((session.get("what") or {}).get("reuse_volumes"))
     record = {
         "backend": pair["backend"],
         "storage": pair["storage"],
         "status": "running",
         "when": {"started_at": utcnow(), "finished_at": None},
         "services": services,
+        "reuse_volumes": keep,
     }
-    print(f"pair {slug}: wipe -> up {', '.join(services)}")
-    wipe_stack(env_file)
+    if keep:
+        print(f"pair {slug}: reuse -> up {', '.join(services)}", flush=True)
+    else:
+        print(f"pair {slug}: wipe -> up {', '.join(services)}", flush=True)
+        wipe_stack(env_file)
     try:
         compose_checked(["up", "-d", "--build", *services], env_file, capture=False)
+        if keep:
+            compose_checked(
+                ["up", "-d", "--build", "--force-recreate", "--no-deps", API_SERVICE[pair["backend"]]],
+                env_file,
+                capture=False,
+            )
         wait_ready(API_READY[pair["backend"]])
         wait_ready("http://127.0.0.1:9090/-/ready")
+        if keep:
+            # Host :808x can be up before Docker DNS publishes the API alias.
+            time.sleep(5)
         window = session["what"]["duration"]
-        print(f"pair {slug}: load {window}")
+        print(f"pair {slug}: load {window}", flush=True)
         proc = compose(
             ["--profile", "load", "run", "--rm", "--build", "--no-deps", "generator"],
             env_file,
@@ -240,6 +322,12 @@ def run_pair(session: dict, pair: dict) -> dict:
         except SessionError as exc:
             record["prometheus_error"] = str(exc)
         record["resources"] = collect_docker_stats(pair)
+        record["storage_size"] = collect_storage_size(pair, env_file)
+        size = record["storage_size"]
+        if size.get("bytes") is not None:
+            print(f"pair {slug}: disk {size['mib']} MiB ({size['bytes']} bytes)", flush=True)
+        elif size.get("error"):
+            print(f"pair {slug}: disk measure failed: {size['error']}", file=sys.stderr)
         record["status"] = "completed"
     except Exception as exc:
         record["status"] = "failed"
@@ -248,8 +336,11 @@ def run_pair(session: dict, pair: dict) -> dict:
     finally:
         record["when"]["finished_at"] = utcnow()
         dump_yaml(work / "pair.yaml", record)
-        print(f"pair {slug}: cleanup")
-        wipe_stack(env_file)
+        if keep:
+            print(f"pair {slug}: done (volumes kept)", flush=True)
+        else:
+            print(f"pair {slug}: cleanup", flush=True)
+            wipe_stack(env_file)
     return record
 
 
@@ -260,13 +351,21 @@ def cmd_new(args: argparse.Namespace) -> int:
         duration=args.duration,
         transport=args.transport,
         pairs=args.pairs,
+        reuse_volumes=args.keep,
+        archive_end=args.archive_end,
     )
     path = save_session(session)
     print(f"created {session['id']} ({path})")
     print("pairs: " + ", ".join(pair_slug(p) for p in session["what"]["pairs"]))
     if args.run:
         return cmd_run(
-            argparse.Namespace(id=session["id"], from_pair=None, only_pair=None, fail_fast=args.fail_fast)
+            argparse.Namespace(
+                id=session["id"],
+                from_pair=None,
+                only_pair=None,
+                fail_fast=args.fail_fast,
+                keep=args.keep,
+            )
         )
     return 0
 
@@ -289,13 +388,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         if args.from_pair not in slugs:
             raise SessionError(f"unknown pair {args.from_pair!r}")
         start_at = slugs.index(args.from_pair)
+    if getattr(args, "keep", False):
+        session["what"]["reuse_volumes"] = True
+        session["what"]["skip_seed"] = True
+        session["what"].setdefault("archive_end", LAB_ARCHIVE_END)
     session["status"] = "running"
     session["when"]["started_at"] = session["when"].get("started_at") or utcnow()
     session.setdefault("results", {}).setdefault("pairs", {})
     save_session(session)
     print(
         f"dispatch {session_id} duration={session['what']['duration']} "
-        f"profile={session['what']['load']['profile']} pairs={', '.join(slugs[start_at:stop_at])}"
+        f"profile={session['what']['load']['profile']} pairs={', '.join(slugs[start_at:stop_at])}",
+        flush=True,
     )
     failed = False
     try:
@@ -330,7 +434,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         session.setdefault("results", {})["error"] = str(exc)
         session["conclusions"] = draft_conclusions(session)
         save_session(session)
-        wipe_stack()
+        if not (session.get("what") or {}).get("reuse_volumes"):
+            wipe_stack()
         print(f"failed {session_id}: {exc}", file=sys.stderr)
         return 1
 
@@ -394,6 +499,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     new.add_argument("--run", action="store_true", help="dispatch immediately")
     new.add_argument("--fail-fast", action="store_true")
+    new.add_argument("--keep", action="store_true", help="reuse volumes, skip wipe and archive seed")
+    new.add_argument("--archive-end", help="UTC end of the existing archive (required for --keep query-mix)")
     new.set_defaults(func=cmd_new)
 
     run = sub.add_parser("run", help="dispatch pairs: clean start, run, record, wipe")
@@ -401,6 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--from-pair", help="resume from this pair slug, e.g. python-influxdb")
     run.add_argument("--only-pair", help="run a single pair slug and keep the rest of the session")
     run.add_argument("--fail-fast", action="store_true")
+    run.add_argument("--keep", action="store_true", help="reuse volumes, skip wipe and archive seed")
     run.set_defaults(func=cmd_run)
 
     listing = sub.add_parser("list", help="show the session catalog")

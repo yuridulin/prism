@@ -55,11 +55,11 @@ def parse_duration(raw: str | int | float) -> int:
     text = str(raw).strip()
     if text.isdigit():
         return parse_duration(int(text))
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)(ms|s|m|h)", text)
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(ms|s|m|h|d)", text)
     if not match:
         raise SessionError(f"invalid duration {raw!r}, expected 5m / 300s / 300")
     amount = float(match.group(1))
-    mul = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}[match.group(2)]
+    mul = {"ms": 0.001, "s": 1, "m": 60, "h": 3600, "d": 86400}[match.group(2)]
     seconds = int(amount * mul)
     if seconds <= 0:
         raise SessionError("duration must be positive")
@@ -125,6 +125,9 @@ def pair_services(pair: dict) -> list[str]:
     return services
 
 
+LAB_ARCHIVE_END = "2026-08-20T16:49:20Z"
+
+
 def new_session(
     why: str,
     profile: str | None = None,
@@ -132,6 +135,8 @@ def new_session(
     transport: str | None = None,
     pairs: str | list | None = None,
     created_at: str | None = None,
+    reuse_volumes: bool = False,
+    archive_end: str | None = None,
 ) -> dict:
     why = (why or "").strip()
     if not why:
@@ -164,6 +169,9 @@ def new_session(
             "load": load,
             "pairs": resolved,
             "resources": deepcopy(defaults["resources"]),
+            "reuse_volumes": bool(reuse_volumes),
+            "skip_seed": bool(reuse_volumes),
+            "archive_end": (archive_end or LAB_ARCHIVE_END) if reuse_volumes else None,
         },
         "results": {"pairs": {}},
         "conclusions": "",
@@ -237,6 +245,8 @@ def compose_env(session: dict, pair: dict) -> dict[str, str]:
         "GENERATOR_DURATION": str(what["duration_seconds"]),
         "GENERATOR_TARGET": str(load.get("transport") or ""),
         "GENERATOR_HTTP_URL": API_URL[pair["backend"]],
+        "ARCHIVE_END": str(what.get("archive_end") or (session.get("when") or {}).get("created_at") or ""),
+        "ARCHIVE_SEED": "0" if what.get("skip_seed") or what.get("reuse_volumes") else "1",
     }
     for group in RESOURCE_GROUPS:
         spec = resources[group]
@@ -264,7 +274,7 @@ def parse_generator_output(text: str) -> dict:
     if not match:
         return {"raw_excerpt": text[-1000:]}
     data = match.groupdict()
-    return {
+    out = {
         "profile": data["profile"],
         "written": int(data["written"]),
         "queries": int(data["queries"]),
@@ -273,6 +283,13 @@ def parse_generator_output(text: str) -> dict:
         "elapsed_seconds": float(data["elapsed"]),
         "ingest_rate": float(data["ingest_rate"]),
     }
+    seed = re.search(r"seed_elapsed=(?P<seed_elapsed>[\d.]+)s", text)
+    if seed:
+        out["seed_elapsed_seconds"] = float(seed.group("seed_elapsed"))
+    query_elapsed = re.search(r"query_elapsed=(?P<query_elapsed>[\d.]+)s", text)
+    if query_elapsed:
+        out["query_elapsed_seconds"] = float(query_elapsed.group("query_elapsed"))
+    return out
 
 
 def _prom(record: dict) -> dict:
@@ -290,10 +307,16 @@ def pair_scorecard(slug: str, record: dict) -> dict:
     gen = record.get("generator") or {}
     prom = _prom(record)
     stats = record.get("resources") or {}
+    read_heavy = gen.get("profile") == "query-mix"
+    ingest_rate = None if read_heavy else (
+        gen.get("ingest_rate") if gen.get("ingest_rate") is not None else prom.get("ingest_rate")
+    )
     return {
         "pair": slug,
         "status": record.get("status"),
-        "ingest_rate": gen.get("ingest_rate") if gen.get("ingest_rate") is not None else prom.get("ingest_rate"),
+        "ingest_rate": ingest_rate,
+        "seed_written": gen.get("written") if read_heavy else None,
+        "seed_elapsed_seconds": gen.get("seed_elapsed_seconds") if read_heavy else None,
         "write_errors": gen.get("write_errors"),
         "query_errors": gen.get("query_errors"),
         "queries": gen.get("queries"),
@@ -308,6 +331,8 @@ def pair_scorecard(slug: str, record: dict) -> dict:
         "mem_api": (stats.get("api") or {}).get("mem"),
         "cpu_storage": (stats.get("storage") or {}).get("cpu"),
         "mem_storage": (stats.get("storage") or {}).get("mem"),
+        "storage_bytes": (record.get("storage_size") or {}).get("bytes"),
+        "storage_mib": (record.get("storage_size") or {}).get("mib"),
     }
 
 
@@ -323,24 +348,41 @@ def build_comparison(session: dict) -> dict:
     pairs = (session.get("results") or {}).get("pairs") or {}
     rows = [pair_scorecard(slug, record) for slug, record in pairs.items()]
     read_heavy = profile == "query-mix"
-    return {
-        "profile": profile,
-        "duration": what.get("duration"),
-        "envelope": what.get("resources"),
-        "how": (
+    if read_heavy:
+        how = (
+            "Одинаковый resource envelope и чистый старт на каждую пару. "
+            "Сначала тот же архив (год, частые и редкие теги), затем только locf/range. "
+            "Эффективнее та, что отвечает быстрее на locf и range без ошибок "
+            "и занимает меньше места тем же архивом. "
+            "storage_*_p95 показывает, где сидит задержка — в БД или в API. "
+            "Seed в scorecard не входит."
+        )
+    else:
+        how = (
             "Одинаковый resource envelope и чистый старт на каждую пару. "
             "Эффективнее та, что держит предложенный ingest без ошибок "
             "и отвечает быстрее на locf/range. "
             "storage_*_p95 показывает, где сидит задержка — в БД или в API."
-        ),
-        "primary": "read" if read_heavy else "write",
-        "rows": rows,
-        "ranks": {
+        )
+    ranks = {
+        "locf_p95_ms": _rank(rows, "locf_p95_ms", reverse=False),
+        "range_p95_ms": _rank(rows, "range_p95_ms", reverse=False),
+        "storage_mib": _rank(rows, "storage_mib", reverse=False),
+    }
+    if not read_heavy:
+        ranks = {
             "ingest_rate": _rank(rows, "ingest_rate", reverse=True),
             "write_p95_ms": _rank(rows, "write_p95_ms", reverse=False),
-            "locf_p95_ms": _rank(rows, "locf_p95_ms", reverse=False),
-            "range_p95_ms": _rank(rows, "range_p95_ms", reverse=False),
-        },
+            **ranks,
+        }
+    return {
+        "profile": profile,
+        "duration": what.get("duration"),
+        "envelope": what.get("resources"),
+        "how": how,
+        "primary": "read" if read_heavy else "write",
+        "rows": rows,
+        "ranks": ranks,
     }
 
 
@@ -350,7 +392,7 @@ def format_comparison(comparison: dict) -> str:
         comparison.get("how", ""),
         "",
         f"{'pair':<24} {'status':<10} {'ingest/s':>10} {'w_err':>6} {'q_err':>6} "
-        f"{'w p95':>8} {'locf':>8} {'range':>8} {'cpu api':>8} {'cpu db':>8}",
+        f"{'w p95':>8} {'locf':>8} {'range':>8} {'disk':>8} {'cpu api':>8} {'cpu db':>8}",
     ]
     for row in comparison.get("rows") or []:
         lines.append(
@@ -358,6 +400,7 @@ def format_comparison(comparison: dict) -> str:
             f"{_fmt(row.get('ingest_rate'), 10)} {_fmt(row.get('write_errors'), 6)} "
             f"{_fmt(row.get('query_errors'), 6)} {_fmt(row.get('write_p95_ms'), 8)} "
             f"{_fmt(row.get('locf_p95_ms'), 8)} {_fmt(row.get('range_p95_ms'), 8)} "
+            f"{_fmt(row.get('storage_mib'), 8)} "
             f"{_fmt(row.get('cpu_api'), 8)} {_fmt(row.get('cpu_storage'), 8)}"
         )
     ranks = comparison.get("ranks") or {}
@@ -368,6 +411,8 @@ def format_comparison(comparison: dict) -> str:
         lines.append("locf:   " + " > ".join(ranks["locf_p95_ms"]) + "  (меньше p95 лучше)")
     if ranks.get("range_p95_ms"):
         lines.append("range:  " + " > ".join(ranks["range_p95_ms"]) + "  (меньше p95 лучше)")
+    if ranks.get("storage_mib"):
+        lines.append("disk:   " + " > ".join(ranks["storage_mib"]) + "  (меньше MiB лучше)")
     return "\n".join(lines) + "\n"
 
 

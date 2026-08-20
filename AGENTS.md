@@ -8,16 +8,18 @@
 - Каждая пара: `down -v` → up только её сервисов → нагрузка → запись → снова wipe.
 - Envelope один на все пары, из `sessions/defaults.yaml`. Не крутить CPU/RAM «чтобы красивее выглядело».
 - Старт: `python sessions/run.py new --why "..." --duration 3m`, затем `run`.
+- Для `query-mix` duration — только фаза чтения. Seed архива идёт раньше и в duration не входит.
 - Продолжить с сорвавшейся пары: `--from-pair <slug>`.
+- Повторное чтение на уже залитом архиве: `--keep` (без `down -v` и без seed). `ARCHIVE_END` должен совпадать с сидом.
 - `wait_ready` обязан переживать обрыв TCP: C# и Rust поднимаются дольше Go. Не сужать `except` до `URLError`.
 
 ## Что сравниваем
 
 - `iot-steady`, `high-cardinality`, `burst` — запись при фиксированном offer. locf/range там будут `n/a`.
 - `write-ceiling` — потолок записи. HTTP, offer выше конверта; ingest/s и ошибки — это пара, не NATS.
-- Чтения — профиль `query-mix`.
+- Чтения — профиль `query-mix`: сначала одинаковый архив на год (частые 1m / редкие 1h), затем locf и range 1..30d на готовой БД. Seed в scorecard не входит.
 - Полная матрица: 4 API × 5 БД. Пары по очереди, тот же envelope.
-- Scorecard: ingest, ошибки write/query, p95 write/locf/range (backend и storage), CPU/RAM.
+- Scorecard: ingest, ошибки write/query, p95 write/locf/range (backend и storage), CPU/RAM, диск тома БД (`storage_mib`) после той же истории.
 - На лёгком ingest (~2k/s) пары не разъедутся по rate — не писать «все одинаковые».
 - CPU API в конце часто 0%: снимок `docker stats` после генератора.
 
@@ -62,3 +64,4 @@ QuestDB — HTTP `/write`, хотя есть ILP `:9009`, VM — prometheus impo
 - File sharing только `D:\Work`. Весь `D:` шарить нельзя — там диск VM.
 - QuestDB HTTP с хоста: `9001`. Порт `9000` занят ClickHouse native.
 - Prometheus: `user: "65534:65534"`. После переноса data-root образ без этого падает.
+- Ряды в Timescale / ClickHouse / Influx / VictoriaMetrics хранятся 400 дней — иначе годовой архив для `query-mix` срежется. Prometheus по-прежнему 7d.

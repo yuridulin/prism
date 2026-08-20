@@ -1,25 +1,47 @@
 name: query-mix
-description: Ingest plus the two main read modes, with light sample/twavg.
+description: >-
+  Year-long archive, then locf (exact) and range (1..30d) on a prepared DB.
+  Frequent tags tick every minute, rare tags every hour. No live ingest
+  during the measured query phase.
 
 transport: http
 duration: 0
 
-ingest:
+archive:
   enabled: true
-  rate: 500
-  batch: 50
+  span: 365d
+  batch: 2000
+  workers: 4
+  tags:
+    - { class: frequent, start: 1, count: 8, period: 1m }
+    - { class: rare, start: 9, count: 72, period: 1h }
+
+ingest:
+  enabled: false
+  rate: 0
+  batch: 100
   workers: 1
   tag_start: 1
-  tag_count: 250
+  tag_count: 80
   good_ratio: 0.98
   out_of_order: 0.0
   late_ms: 0
 
 query:
   enabled: true
-  rate: 40
+  rate: 16
+  workers: 8
+  rng_seed: 42
+  tag_sets:
+    - { class: frequent, size: 1 }
+    - { class: rare, size: 1 }
+    - { class: frequent, size: 8 }
+    - { class: rare, size: 8 }
+    - { class: mixed, size: 8 }
+  at_offsets: [0s, 1d, 7d, 30d, 90d, 180d, 364d]
+  end_offsets: [0s, 7d, 30d, 90d, 180d]
   mix:
-    - { op: locf, weight: 50 }
-    - { op: range, weight: 40, window: 15m }
-    - { op: sample, weight: 7, window: 15m, step: 1m }
-    - { op: twavg, weight: 3, window: 15m }
+    - { op: locf, weight: 2 }
+    - { op: range, weight: 1, window: 1d }
+    - { op: range, weight: 1, window: 7d }
+    - { op: range, weight: 1, window: 30d }

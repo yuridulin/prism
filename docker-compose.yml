@@ -69,7 +69,7 @@ services:
       DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-prism}
       DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-prism}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
-      DOCKER_INFLUXDB_INIT_RETENTION: 7d
+      DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUX_RETENTION:-400d}
     ports:
       - "${INFLUX_PORT:-8086}:8086"
     volumes:
@@ -87,7 +87,7 @@ services:
     command:
       - "--storageDataPath=/victoria-metrics-data"
       - "--httpListenAddr=:8428"
-      - "--retentionPeriod=7d"
+      - "--retentionPeriod=400d"
     ports:
       - "${VM_PORT:-8428}:8428"
     volumes:
@@ -256,6 +256,8 @@ services:
       NATS_URL: nats://nats:4222
       NATS_SUBJECT: ${NATS_SUBJECT:-prism.samples}
       DURATION: ${GENERATOR_DURATION:-}
+      ARCHIVE_END: ${ARCHIVE_END:-}
+      ARCHIVE_SEED: ${ARCHIVE_SEED:-1}
     volumes:
       - ./profiles:/profiles:ro
     depends_on:

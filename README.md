@@ -53,7 +53,7 @@ curl -X POST http://localhost:8081/v1/range -H "Content-Type: application/json" 
 
 ```powershell
 pip install -r sessions/requirements.txt
-python sessions/run.py new --why "LOCF и range на тегах"
+python sessions/run.py new --why "LOCF и range на годовом архиве" --profile query-mix
 python sessions/run.py run
 python sessions/run.py new --why "Только ClickHouse" --pairs go:clickhouse,csharp:clickhouse,rust:clickhouse --run
 ```
@@ -66,7 +66,7 @@ python sessions/run.py new --why "Только ClickHouse" --pairs go:clickhouse
 | `high-cardinality` | 10k тегов |
 | `burst` | write-spike + out-of-order |
 | `write-ceiling` | Потолок записи: HTTP, offer выше конверта |
-| `query-mix` | ingest + locf/range/sample/twavg |
+| `query-mix` | год архива (частые/редкие теги), затем locf и range 1..30d |
 
 ```yaml
 ingest:
@@ -77,6 +77,21 @@ query:
   mix:
     - { op: locf, weight: 50 }
     - { op: range, weight: 40, window: 15m }
+```
+
+`query-mix` готовит архив, потом только читает:
+
+```yaml
+archive:
+  span: 365d
+  tags:
+    - { class: frequent, start: 1, count: 8, period: 1m }
+    - { class: rare, start: 9, count: 72, period: 1h }
+query:
+  mix:
+    - { op: locf, weight: 2 }
+    - { op: range, weight: 1, window: 1d }
+    - { op: range, weight: 1, window: 30d }
 ```
 
 ## Контракт
