@@ -1,0 +1,148 @@
+profile: query-mix
+duration: 5m
+envelope:
+  api:
+    cpus: '1.0'
+    memory: 512M
+  storage:
+    cpus: '1.0'
+    memory: 1G
+  bus:
+    cpus: '0.50'
+    memory: 256M
+  observe:
+    cpus: '0.50'
+    memory: 512M
+  generator:
+    cpus: '1.0'
+    memory: 512M
+how: Одинаковый resource envelope и чистый старт на каждую пару. Сначала тот же архив
+  (год, частые и редкие теги), затем только locf/range. Эффективнее та, что отвечает
+  быстрее на locf и range без ошибок и занимает меньше места тем же архивом. storage_*_p95
+  показывает, где сидит задержка — в БД или в API. Seed в scorecard не входит.
+primary: read
+rows:
+- pair: go-questdb
+  status: completed
+  ingest_rate: null
+  seed_written: 4835600
+  seed_elapsed_seconds: 19.1
+  write_errors: 0
+  query_errors: 0
+  queries: 3339
+  write_p95_ms: null
+  locf_p95_ms: 206.205
+  range_p95_ms: 1966.807
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 206.205
+  storage_range_p95_ms: 1966.806
+  api_p95_ms: 1523.357
+  cpu_api: 0.59%
+  mem_api: 293.7MiB
+  cpu_storage: 12.26%
+  mem_storage: 726.8MiB
+  storage_bytes: 318562188
+  storage_mib: 303.8
+- pair: go-clickhouse
+  status: completed
+  ingest_rate: null
+  seed_written: 4835600
+  seed_elapsed_seconds: 25.0
+  write_errors: 0
+  query_errors: 3
+  queries: 395
+  write_p95_ms: null
+  locf_p95_ms: 10000.0
+  range_p95_ms: 10000.0
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 10000.0
+  storage_range_p95_ms: 10000.0
+  api_p95_ms: 10000.0
+  cpu_api: 0.17%
+  mem_api: 154.9MiB
+  cpu_storage: 45.20%
+  mem_storage: 596.9MiB
+  storage_bytes: 136914132
+  storage_mib: 130.6
+- pair: go-timescaledb
+  status: completed
+  ingest_rate: null
+  seed_written: 4835600
+  seed_elapsed_seconds: 67.3
+  write_errors: 0
+  query_errors: 2460
+  queries: 2291
+  write_p95_ms: null
+  locf_p95_ms: 18.233
+  range_p95_ms: 4.75
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 18.233
+  storage_range_p95_ms: 4.75
+  api_p95_ms: 11.253
+  cpu_api: 0.00%
+  mem_api: 23.81MiB
+  cpu_storage: 0.00%
+  mem_storage: 408.2MiB
+  storage_bytes: 1627672530
+  storage_mib: 1552.3
+- pair: go-influxdb
+  status: completed
+  ingest_rate: null
+  seed_written: 4835600
+  seed_elapsed_seconds: 30.3
+  write_errors: 0
+  query_errors: 190
+  queries: 0
+  write_p95_ms: null
+  locf_p95_ms: 10000.0
+  range_p95_ms: 10000.0
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 10000.0
+  storage_range_p95_ms: 10000.0
+  api_p95_ms: 10000.0
+  cpu_api: 0.00%
+  mem_api: 19.65MiB
+  cpu_storage: 3.10%
+  mem_storage: 982MiB
+  storage_bytes: 100770526
+  storage_mib: 96.1
+- pair: go-victoriametrics
+  status: completed
+  ingest_rate: null
+  seed_written: 4835600
+  seed_elapsed_seconds: 18.3
+  write_errors: 0
+  query_errors: 0
+  queries: 4257
+  write_p95_ms: null
+  locf_p95_ms: 39.099
+  range_p95_ms: 249.942
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 39.099
+  storage_range_p95_ms: 249.942
+  api_p95_ms: 415.957
+  cpu_api: 1.92%
+  mem_api: 131.1MiB
+  cpu_storage: 0.16%
+  mem_storage: 386.6MiB
+  storage_bytes: 15430086
+  storage_mib: 14.7
+ranks:
+  locf_p95_ms:
+  - go-timescaledb
+  - go-victoriametrics
+  - go-questdb
+  - go-clickhouse
+  - go-influxdb
+  range_p95_ms:
+  - go-timescaledb
+  - go-victoriametrics
+  - go-questdb
+  - go-clickhouse
+  - go-influxdb
+  storage_mib:
+  - go-victoriametrics
+  - go-influxdb
+  - go-clickhouse
+  - go-questdb
+  - go-timescaledb

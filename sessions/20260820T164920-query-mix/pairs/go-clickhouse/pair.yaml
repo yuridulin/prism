@@ -1,0 +1,77 @@
+backend: go
+storage: clickhouse
+status: completed
+when:
+  started_at: '2026-08-20T16:55:19Z'
+  finished_at: '2026-08-20T17:00:59Z'
+services:
+- nats
+- clickhouse
+- go-api
+- prometheus
+generator:
+  profile: query-mix
+  written: 4835600
+  queries: 395
+  write_errors: 0
+  query_errors: 3
+  elapsed_seconds: 325.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 25.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: go
+  storage: clickhouse
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: go
+  storage: clickhouse
+  ingest_rate: 0.0
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 10.0
+  range_p95_seconds: 10.0
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 10.0
+  storage_range_p95_seconds: 10.0
+  api_p95_seconds: 10.0
+  locf_error_rate: 0.0
+  range_error_rate: 0.003401517377408317
+resources:
+  raw:
+  - name: prism-go-api-1
+    cpu: 0.17%
+    mem: 154.9MiB
+  - name: prism-clickhouse-1
+    cpu: 45.20%
+    mem: 596.9MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 8.352MiB
+  - name: prism-prometheus-1
+    cpu: 0.07%
+    mem: 49.43MiB
+  api:
+    cpu: 0.17%
+    mem: 154.9MiB
+  storage:
+    cpu: 45.20%
+    mem: 596.9MiB
+storage_size:
+  bytes: 136914132
+  mib: 130.6
+  volume: prism_clickhouse_data
+  path: /var/lib/clickhouse

@@ -1,0 +1,102 @@
+backend: go
+storage: influxdb
+status: completed
+when:
+  started_at: '2026-08-20T18:31:40Z'
+  finished_at: '2026-08-20T18:36:47Z'
+services:
+- nats
+- influxdb
+- go-api
+- prometheus
+reuse_volumes: true
+generator:
+  profile: query-mix
+  written: 0
+  queries: 2015
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 300.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: go
+  storage: influxdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: go
+  storage: influxdb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.0963136574074074
+  range_p95_seconds: 7.244505494505491
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.0963136574074074
+  storage_range_p95_seconds: 7.244505494505491
+  api_p95_seconds: 4.8571428571428505
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 35.28MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 16.12MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 8.41MiB
+  - name: prism-python-api-1
+    cpu: 0.14%
+    mem: 14.5MiB
+  - name: prism-csharp-api-1
+    cpu: 0.30%
+    mem: 112.4MiB
+  - name: prism-timescaledb-1
+    cpu: 0.02%
+    mem: 39.39MiB
+  - name: prism-questdb-1
+    cpu: 7.21%
+    mem: 349.9MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 14.91MiB
+  - name: prism-clickhouse-1
+    cpu: 3.35%
+    mem: 843.3MiB
+  - name: prism-influxdb-1
+    cpu: 0.71%
+    mem: 417.1MiB
+  - name: prism-prometheus-1
+    cpu: 0.10%
+    mem: 77.24MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.10%
+    mem: 72.13MiB
+  api:
+    cpu: 0.00%
+    mem: 35.28MiB
+  storage:
+    cpu: 0.71%
+    mem: 417.1MiB
+storage_size:
+  bytes: 72209639
+  mib: 68.9
+  volume: prism_influx_data
+  path: /var/lib/influxdb2

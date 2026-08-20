@@ -78,3 +78,29 @@ sessions:
   - rust-influxdb
   - rust-victoriametrics
   path: sessions/20260819T165135-write-ceiling/session.yaml
+- id: 20260820T164920-query-mix
+  status: completed
+  created_at: '2026-08-20T16:49:20Z'
+  why: LOCF/range и диск на годовом архиве, Go x 5 БД
+  profile: query-mix
+  duration: 5m
+  pairs:
+  - go-questdb
+  - go-clickhouse
+  - go-timescaledb
+  - go-influxdb
+  - go-victoriametrics
+  path: sessions/20260820T164920-query-mix/session.yaml
+- id: 20260820T180620-query-mix
+  status: completed
+  created_at: '2026-08-20T18:06:20Z'
+  why: 'query-mix повтор: только чтение на уже залитом архиве после правок сторов'
+  profile: query-mix
+  duration: 5m
+  pairs:
+  - go-questdb
+  - go-clickhouse
+  - go-timescaledb
+  - go-influxdb
+  - go-victoriametrics
+  path: sessions/20260820T180620-query-mix/session.yaml

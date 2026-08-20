@@ -1,0 +1,102 @@
+backend: go
+storage: questdb
+status: completed
+when:
+  started_at: '2026-08-20T18:42:23Z'
+  finished_at: '2026-08-20T18:47:37Z'
+services:
+- nats
+- questdb
+- go-api
+- prometheus
+reuse_volumes: true
+generator:
+  profile: query-mix
+  written: 0
+  queries: 3050
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 300.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: go
+  storage: questdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: go
+  storage: questdb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.004976353790613717
+  range_p95_seconds: 2.1654255319148934
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.004976353790613717
+  storage_range_p95_seconds: 2.1654255319148934
+  api_p95_seconds: 1.9261986301369853
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-go-api-1
+    cpu: 0.12%
+    mem: 293.1MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 18.6MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 8.43MiB
+  - name: prism-python-api-1
+    cpu: 0.12%
+    mem: 20.27MiB
+  - name: prism-csharp-api-1
+    cpu: 0.01%
+    mem: 122MiB
+  - name: prism-timescaledb-1
+    cpu: 2.33%
+    mem: 43MiB
+  - name: prism-questdb-1
+    cpu: 10.40%
+    mem: 380.5MiB
+  - name: prism-nats-1
+    cpu: 0.04%
+    mem: 15.28MiB
+  - name: prism-clickhouse-1
+    cpu: 5.63%
+    mem: 845.4MiB
+  - name: prism-influxdb-1
+    cpu: 5.82%
+    mem: 300.3MiB
+  - name: prism-prometheus-1
+    cpu: 0.54%
+    mem: 86.84MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.15%
+    mem: 79.69MiB
+  api:
+    cpu: 0.12%
+    mem: 293.1MiB
+  storage:
+    cpu: 10.40%
+    mem: 380.5MiB
+storage_size:
+  bytes: 344544660
+  mib: 328.6
+  volume: prism_questdb_data
+  path: /var/lib/questdb

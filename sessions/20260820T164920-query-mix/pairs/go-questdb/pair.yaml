@@ -1,0 +1,77 @@
+backend: go
+storage: questdb
+status: completed
+when:
+  started_at: '2026-08-20T16:49:20Z'
+  finished_at: '2026-08-20T16:55:17Z'
+services:
+- nats
+- questdb
+- go-api
+- prometheus
+generator:
+  profile: query-mix
+  written: 4835600
+  queries: 3339
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 319.1
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 19.1
+  query_elapsed_seconds: 300.0
+meta:
+  backend: go
+  storage: questdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.1
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - twavg
+  - tags
+prometheus:
+- backend: go
+  storage: questdb
+  ingest_rate: 0.0
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.20620501527281837
+  range_p95_seconds: 1.9668072246348487
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.2062049402534048
+  storage_range_p95_seconds: 1.9668061876514493
+  api_p95_seconds: 1.523357472318403
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-go-api-1
+    cpu: 0.59%
+    mem: 293.7MiB
+  - name: prism-prometheus-1
+    cpu: 0.16%
+    mem: 134.1MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 22.79MiB
+  - name: prism-questdb-1
+    cpu: 12.26%
+    mem: 726.8MiB
+  api:
+    cpu: 0.59%
+    mem: 293.7MiB
+  storage:
+    cpu: 12.26%
+    mem: 726.8MiB
+storage_size:
+  bytes: 318562188
+  mib: 303.8
+  volume: prism_questdb_data
+  path: /var/lib/questdb
