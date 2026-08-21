@@ -44,7 +44,7 @@ def _parse_rows(blob: bytes, carried: bool) -> list[Sample]:
     if len(blob) % _ROW.size:
         raise RuntimeError("clickhouse rowbinary truncated")
     return [
-        Sample.model_construct(ts=_from_ms(ts), tag_id=tag_id, value=float(value), quality=quality, carried=carried)
+        Sample(ts=_from_ms(ts), tag_id=tag_id, value=float(value), quality=quality, carried=carried)
         for ts, tag_id, value, quality in _ROW.iter_unpack(blob)
     ]
 
@@ -75,7 +75,8 @@ class ClickHouseStore:
         self._http = new_client(timeout=30.0, base_url=origin, auth=auth)
         self._insert_path = (
             f"/?database={quote(database)}&query={quote(_INSERT)}"
-            "&async_insert=1&wait_for_async_insert=1&async_insert_busy_timeout_ms=10"
+            "&async_insert=1&wait_for_async_insert=1&async_insert_busy_timeout_ms=200"
+            "&async_insert_max_data_size=1048576"
         )
 
     async def ping(self) -> None:
@@ -116,7 +117,7 @@ class ClickHouseStore:
         return rows
 
     async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
-        head = [s.model_copy(update={"carried": True}) for s in await self.locf(tag_ids, start)]
+        head = [s.as_carried() for s in await self.locf(tag_ids, start)]
         ids = _ids(tag_ids)
         left, right = _ch_time(start), _ch_time(end)
         tail = _parse_rows(

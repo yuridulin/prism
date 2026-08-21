@@ -273,9 +273,14 @@ services:
 
 volumes:
   timescale_data:
+    name: prism_timescale_${PRISM_VOLUME_SET:-data}
   clickhouse_data:
+    name: prism_clickhouse_${PRISM_VOLUME_SET:-data}
   questdb_data:
+    name: prism_questdb_${PRISM_VOLUME_SET:-data}
   influx_data:
+    name: prism_influx_${PRISM_VOLUME_SET:-data}
   vm_data:
+    name: prism_vm_${PRISM_VOLUME_SET:-data}
   prometheus_data:
   grafana_data:

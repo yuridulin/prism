@@ -56,7 +56,7 @@ def _parse_influx_csv(text: str, carried: bool) -> list[Sample]:
         except ValueError:
             ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
         out.append(
-            Sample.model_construct(
+            Sample(
                 ts=ts, tag_id=tag_id, value=float(row[vi] or 0), quality=quality, carried=carried
             )
         )
@@ -152,7 +152,7 @@ class InfluxStore:
                     ts = datetime.fromtimestamp(int(row[ti]) / 1000, tz=timezone.utc)
                     quality = int(float(row[qi])) if qi is not None and qi < len(row) else 0
                     out.append(
-                        Sample.model_construct(
+                        Sample(
                             ts=ts,
                             tag_id=tag_id,
                             value=float(row[vi]),

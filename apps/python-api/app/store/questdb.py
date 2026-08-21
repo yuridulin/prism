@@ -2,14 +2,15 @@ import asyncio
 import csv
 import io
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models import Sample, Tag
 from app.store.net import ilp_float, new_client, parse_hostport, raise_status, unix_ns
 
 
 def _qdb_time(ts: datetime) -> str:
-    return ts.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    utc = ts.astimezone(timezone.utc) if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    return utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _symbol_ids(tag_ids: list[int]) -> str:
@@ -30,10 +31,13 @@ def _parse_qdb_csv(text: str) -> list[Sample]:
         if max(ts_i, tag_i, val_i, q_i) >= len(row):
             continue
         ts = row[ts_i]
-        stamp = datetime.fromisoformat(ts.replace("Z", "+00:00")) if isinstance(ts, str) else ts
-        sample = Sample.model_construct(
-            ts=stamp, tag_id=int(row[tag_i]), value=float(row[val_i]), quality=int(float(row[q_i]))
-        )
+        try:
+            stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            sample = Sample(
+                ts=stamp, tag_id=int(row[tag_i]), value=float(row[val_i]), quality=int(float(row[q_i]))
+            )
+        except (TypeError, ValueError):
+            continue
         if c_i is not None and c_i < len(row):
             sample.carried = str(row[c_i]).lower() in {"true", "t", "1"}
         out.append(sample)
@@ -177,10 +181,17 @@ class QuestDBStore:
     def _samples(self, data: dict, has_carried: bool) -> list[Sample]:
         out: list[Sample] = []
         for row in data.get("dataset") or []:
+            if len(row) < 4:
+                continue
             ts = row[0]
-            if isinstance(ts, str):
-                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            sample = Sample(ts=ts, tag_id=int(row[1]), value=float(row[2]), quality=int(row[3]))
+            try:
+                if isinstance(ts, str):
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                elif not isinstance(ts, datetime):
+                    continue
+                sample = Sample(ts=ts, tag_id=int(row[1]), value=float(row[2]), quality=int(row[3]))
+            except (TypeError, ValueError):
+                continue
             if has_carried and len(row) > 4:
                 sample.carried = bool(row[4])
             out.append(sample)

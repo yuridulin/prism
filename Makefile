@@ -1,4 +1,4 @@
-.PHONY: up down logs load load-list meta smoke profiles sessions session-new session-run session-compare
+.PHONY: up down logs load load-list meta smoke profiles sessions session-new session-run session-compare session-preflight
 
 up:
 	docker compose up -d --build
@@ -32,6 +32,9 @@ session-run:
 
 session-compare:
 	python sessions/run.py compare $(ID)
+
+session-preflight:
+	python sessions/run.py preflight $(ID)
 
 smoke:
 	curl -s -X POST http://localhost:8081/v1/write -H "Content-Type: application/json" -d "{\"samples\":[{\"tag_id\":1,\"value\":42.1,\"quality\":192}]}" && echo

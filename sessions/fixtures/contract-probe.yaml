@@ -1,0 +1,22 @@
+# Canonical probe for contract parity across backend × storage.
+# Uses high tag ids so query-mix archive (1..80) is not touched.
+contract: v1.2
+required_ops: [write, locf, range, tags]
+
+write:
+  - { id: 900001, value: 10.5, date: "2020-06-15T12:00:00Z", quality: 192 }
+  - { id: 900001, value: 11.0, date: "2020-06-15T12:05:00Z", quality: 192 }
+  - { id: 900002, value: 20.0, date: "2020-06-15T12:10:00Z", quality: 192 }
+
+locf:
+  tagsId: [900001, 900002]
+  exact: "2020-06-15T12:07:00Z"
+
+range:
+  tagsId: [900001]
+  old: "2020-06-15T12:00:00Z"
+  young: "2020-06-15T12:10:00Z"
+
+# Expected semantics (all backends must match after normalization):
+# locf: 900001 -> 11.0 @ 12:05; 900002 -> 20.0 @ 12:10
+# range 900001: carried 10.5 @ 12:00, points 11.0 @ 12:05

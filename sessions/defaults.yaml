@@ -1,7 +1,8 @@
 # Starting characteristics for a new session.
-# Pairs run one after another: clean start → load → record → wipe volumes.
+# Default dispatch: all DBs stay up per backend; only the API storage target changes.
 
 duration: 5m
+dispatch: by-backend
 
 load:
   profile: iot-steady

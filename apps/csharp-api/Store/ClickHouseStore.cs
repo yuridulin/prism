@@ -32,7 +32,8 @@ public sealed class ClickHouseStore : IStore
         }
 
         _insertPath = "/?database=" + Uri.EscapeDataString(database) + "&query=" + Uri.EscapeDataString(InsertSql)
-                      + "&async_insert=1&wait_for_async_insert=1&async_insert_busy_timeout_ms=10";
+                      + "&async_insert=1&wait_for_async_insert=1&async_insert_busy_timeout_ms=200"
+                      + "&async_insert_max_data_size=1048576";
     }
 
     public string Name => "clickhouse";

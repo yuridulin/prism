@@ -1,3 +1,4 @@
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,12 +9,18 @@ OPS = ["write", "locf", "range", "tags"]
 QUALITY_GOOD = 192
 
 
-class Sample(BaseModel):
-    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+@dataclass(slots=True)
+class Sample:
+    ts: datetime
     tag_id: int
     value: float
     quality: int = QUALITY_GOOD
     carried: bool = False
+
+    def as_carried(self) -> "Sample":
+        if self.carried:
+            return self
+        return replace(self, carried=True)
 
 
 class WriteItem(BaseModel):
@@ -146,7 +153,7 @@ def samples_from_payload(payload: Any, now: datetime) -> list[Sample]:
         stamp = raw.get("date") or raw.get("ts") or now
         if isinstance(stamp, str):
             stamp = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        elif isinstance(stamp, datetime) and stamp.tzinfo is None:
+        if isinstance(stamp, datetime) and stamp.tzinfo is None:
             stamp = stamp.replace(tzinfo=timezone.utc)
         q = QUALITY_GOOD if raw.get("quality") is None else int(raw["quality"])
         try:
@@ -154,7 +161,7 @@ def samples_from_payload(payload: Any, now: datetime) -> list[Sample]:
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("value is required") from exc
         out.append(
-            Sample.model_construct(
+            Sample(
                 ts=stamp,
                 tag_id=int(tag),
                 value=value,

@@ -39,11 +39,12 @@ public sealed class VictoriaMetricsStore : IStore
         using var buf = new ByteWriter(80 * samples.Count);
         foreach (var sample in samples)
         {
-            buf.AppendAscii("prism_sample,tag_id=");
+            // Same ILP as Go: empty measurement, quality label, field prism_sample.
+            buf.AppendAscii(",tag_id=");
             buf.AppendUInt(sample.TagId);
             buf.AppendAscii(",quality=");
             buf.AppendUShort(sample.Quality);
-            buf.AppendAscii(" value=");
+            buf.AppendAscii(" prism_sample=");
             buf.AppendIlpFloat(sample.Value);
             buf.AppendByte((byte)' ');
             buf.AppendLong(StoreUtil.UnixNano(sample.Ts));

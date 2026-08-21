@@ -47,12 +47,13 @@ func (s *ClickHouse) Write(ctx context.Context, samples []model.Sample) error {
 }
 
 func (s *ClickHouse) insert(ctx context.Context, samples []model.Sample) error {
-	// Short busy window coalesces the 8 write-ceiling workers into fewer parts
-	// without parking each HTTP write for the default 200ms flush.
+	// 200ms busy window coalesces the 8 write-ceiling workers into fewer parts.
+	// 10ms minted tiny parts and tripped too-many-parts / async wait.
 	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
 		"async_insert":                 1,
 		"wait_for_async_insert":        1,
-		"async_insert_busy_timeout_ms": 10,
+		"async_insert_busy_timeout_ms": 200,
+		"async_insert_max_data_size":   1048576,
 	}))
 	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO samples (ts, tag_id, value, quality)")
 	if err != nil {

@@ -70,7 +70,12 @@ class TimescaleStore:
 
     async def _conn(self) -> asyncpg.Pool:
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn, min_size=4, max_size=16)
+            self._pool = await asyncpg.create_pool(
+                self._dsn,
+                min_size=4,
+                max_size=16,
+                server_settings={"TimeZone": "UTC"},
+            )
         return self._pool
 
     async def ping(self) -> None:
@@ -107,8 +112,8 @@ class TimescaleStore:
         else:
             raw = await pool.fetch(_LOCF_UNBOUNDED_SQL, tag_ids, at)
         return [
-            Sample.model_construct(
-                ts=r["ts"], tag_id=int(r["tag_id"]), value=float(r["value"]), quality=int(r["quality"])
+            Sample(
+                ts=_utc(r["ts"]), tag_id=int(r["tag_id"]), value=float(r["value"]), quality=int(r["quality"])
             )
             for r in raw
         ]
@@ -116,12 +121,12 @@ class TimescaleStore:
     async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
         start, end = _utc(start), _utc(end)
         ids = [int(i) for i in tag_ids]
-        head = [s.model_copy(update={"carried": True}) for s in await self.locf(ids, start)]
+        head = [s.as_carried() for s in await self.locf(ids, start)]
         pool = await self._conn()
         raw = await pool.fetch(_RANGE_SQL, ids, start, end)
         tail = [
-            Sample.model_construct(
-                ts=r["ts"], tag_id=int(r["tag_id"]), value=float(r["value"]), quality=int(r["quality"])
+            Sample(
+                ts=_utc(r["ts"]), tag_id=int(r["tag_id"]), value=float(r["value"]), quality=int(r["quality"])
             )
             for r in raw
         ]

@@ -4,13 +4,15 @@
 
 ## Сессии
 
-- Пары только по очереди. Параллельный прогон ломает сравнение.
-- Каждая пара: `down -v` → up только её сервисов → нагрузка → запись → снова wipe.
+- По умолчанию **by-backend**: на каждый API поднимаются **все 5 БД сразу**, между storage только переключение `PRISM_STORAGE` и recreate API. Legacy: `--isolated-pairs` / `dispatch: by-pair` — wipe на каждую пару.
+- **Volume sets** (суффикс `PRISM_VOLUME_SET`): `data` — query-mix lab (существующие тома `prism_*_data`), `write` — write-ceiling/iot-steady/burst/high-cardinality, `mixed` — sinus-like*. Запись не трогает lab-тома.
+- **Seed**: для query-mix на томе `data` сид пропускается, если архив уже есть (locf tag 1 и 9 на `ARCHIVE_END`). Явно: `--keep` или `skip_seed: true`.
+- **Preflight** перед `run`: `python sessions/run.py preflight` или автоматически в `run` — write/locf/range на probe-тегах 900001+; все 4 API должны совпасть на каждой БД. `--skip-preflight` только если осознанно.
 - Envelope один на все пары, из `sessions/defaults.yaml`. Не крутить CPU/RAM «чтобы красивее выглядело».
 - Старт: `python sessions/run.py new --why "..." --duration 3m`, затем `run`.
 - Для `query-mix` duration — только фаза чтения. Seed архива идёт раньше и в duration не входит.
 - Продолжить с сорвавшейся пары: `--from-pair <slug>`.
-- Повторное чтение на уже залитом архиве: `--keep` (без `down -v` и без seed). `ARCHIVE_END` должен совпадать с сидом.
+- Повторное чтение на уже залитом архиве: `--keep` (без wipe и без seed). `ARCHIVE_END` должен совпадать с сидом.
 - `wait_ready` обязан переживать обрыв TCP: C# и Rust поднимаются дольше Go. Не сужать `except` до `URLError`.
 
 ## Что сравниваем

@@ -17,6 +17,24 @@ CATALOG_PATH = SESSIONS_DIR / "catalog.yaml"
 RESOURCE_GROUPS = ("api", "storage", "bus", "observe", "generator")
 VALID_BACKENDS = ("go", "python", "csharp", "rust")
 VALID_STORAGES = ("timescaledb", "clickhouse", "questdb", "influxdb", "victoriametrics")
+ALL_STORAGES = list(VALID_STORAGES)
+
+VOLUME_SET_BY_PROFILE = {
+    "query-mix": "data",
+    "write-ceiling": "write",
+    "iot-steady": "write",
+    "burst": "write",
+    "high-cardinality": "write",
+    "sinus-like": "mixed",
+    "sinus-like-headroom": "mixed",
+}
+STORAGE_VOLUME_SUFFIX = {
+    "timescaledb": "timescale",
+    "clickhouse": "clickhouse",
+    "questdb": "questdb",
+    "influxdb": "influx",
+    "victoriametrics": "vm",
+}
 API_SERVICE = {"go": "go-api", "python": "python-api", "csharp": "csharp-api", "rust": "rust-api"}
 API_URL = {
     "go": "http://go-api:8081",
@@ -118,11 +136,40 @@ def parse_pairs(raw: str | list | None) -> list[dict]:
     return [normalize_pair(item) for item in raw]
 
 
+def volume_set_for_profile(profile: str) -> str:
+    return VOLUME_SET_BY_PROFILE.get(profile, "write")
+
+
+def storage_volume_name(storage: str, volume_set: str) -> str:
+    suffix = STORAGE_VOLUME_SUFFIX.get(storage)
+    if not suffix:
+        raise SessionError(f"unknown storage {storage!r}")
+    return f"prism_{suffix}_{volume_set}"
+
+
+def volume_set_for(session: dict) -> str:
+    what = session.get("what") or {}
+    override = what.get("volume_set")
+    if override:
+        return str(override)
+    profile = (what.get("load") or {}).get("profile") or ""
+    return volume_set_for_profile(profile)
+
+
 def pair_services(pair: dict) -> list[str]:
-    services = ["nats", pair["storage"], API_SERVICE[pair["backend"]], "prometheus"]
-    if pair["storage"] == "timescaledb":
-        services.append("postgres-exporter")
+    return backend_stack_services(pair["backend"])
+
+
+def backend_stack_services(backend: str) -> list[str]:
+    services = ["nats", *ALL_STORAGES, API_SERVICE[backend], "prometheus", "postgres-exporter"]
     return services
+
+
+def group_pairs_by_backend(pairs: list[dict]) -> list[tuple[str, list[dict]]]:
+    groups: dict[str, list[dict]] = {}
+    for pair in pairs:
+        groups.setdefault(pair["backend"], []).append(pair)
+    return [(backend, groups[backend]) for backend in VALID_BACKENDS if backend in groups]
 
 
 LAB_ARCHIVE_END = "2026-08-20T16:49:20Z"
@@ -137,6 +184,9 @@ def new_session(
     created_at: str | None = None,
     reuse_volumes: bool = False,
     archive_end: str | None = None,
+    dispatch: str = "by-backend",
+    volume_set: str | None = None,
+    skip_preflight: bool = False,
 ) -> dict:
     why = (why or "").strip()
     if not why:
@@ -151,6 +201,11 @@ def new_session(
     resolved = parse_pairs(pairs if pairs is not None else defaults.get("pairs"))
     if not resolved:
         raise SessionError("session must list at least one pair")
+    dispatch_mode = dispatch or defaults.get("dispatch") or "by-backend"
+    if dispatch_mode not in {"by-backend", "by-pair"}:
+        raise SessionError("dispatch must be by-backend or by-pair")
+    profile_name = load["profile"]
+    vol_set = volume_set or volume_set_for_profile(profile_name)
     created = created_at or utcnow()
     stamp = created.replace("-", "").replace(":", "")[:15]
     session_id = f"{stamp}-{load['profile']}"
@@ -172,6 +227,9 @@ def new_session(
             "reuse_volumes": bool(reuse_volumes),
             "skip_seed": bool(reuse_volumes),
             "archive_end": (archive_end or LAB_ARCHIVE_END) if reuse_volumes else None,
+            "dispatch": dispatch_mode,
+            "volume_set": vol_set,
+            "skip_preflight": bool(skip_preflight),
         },
         "results": {"pairs": {}},
         "conclusions": "",
@@ -235,18 +293,21 @@ def compose_env(session: dict, pair: dict) -> dict[str, str]:
     what = session["what"]
     resources = what["resources"]
     load = what["load"]
+    profile_name = str(load["profile"])
+    skip_seed = bool(what.get("skip_seed") or what.get("reuse_volumes"))
     env = {
         "GO_API_STORAGE": pair["storage"],
         "PYTHON_API_STORAGE": pair["storage"],
         "CSHARP_API_STORAGE": pair["storage"],
         "RUST_API_STORAGE": pair["storage"],
         "PRISM_STORAGE": pair["storage"],
-        "LOAD_PROFILE": str(load["profile"]),
+        "PRISM_VOLUME_SET": volume_set_for(session),
+        "LOAD_PROFILE": profile_name,
         "GENERATOR_DURATION": str(what["duration_seconds"]),
         "GENERATOR_TARGET": str(load.get("transport") or ""),
         "GENERATOR_HTTP_URL": API_URL[pair["backend"]],
         "ARCHIVE_END": str(what.get("archive_end") or (session.get("when") or {}).get("created_at") or ""),
-        "ARCHIVE_SEED": "0" if what.get("skip_seed") or what.get("reuse_volumes") else "1",
+        "ARCHIVE_SEED": "0" if skip_seed else "1",
     }
     for group in RESOURCE_GROUPS:
         spec = resources[group]
@@ -348,9 +409,15 @@ def build_comparison(session: dict) -> dict:
     pairs = (session.get("results") or {}).get("pairs") or {}
     rows = [pair_scorecard(slug, record) for slug, record in pairs.items()]
     read_heavy = profile == "query-mix"
+    dispatch = what.get("dispatch") or "by-backend"
+    dispatch_note = (
+        "На каждый backend все БД подняты сразу; между storage только переключение API. "
+        if dispatch == "by-backend"
+        else "Каждая пара — отдельный чистый старт. "
+    )
     if read_heavy:
         how = (
-            "Одинаковый resource envelope и чистый старт на каждую пару. "
+            f"Одинаковый resource envelope. {dispatch_note}"
             "Сначала тот же архив (год, частые и редкие теги), затем только locf/range. "
             "Эффективнее та, что отвечает быстрее на locf и range без ошибок "
             "и занимает меньше места тем же архивом. "
@@ -359,7 +426,7 @@ def build_comparison(session: dict) -> dict:
         )
     else:
         how = (
-            "Одинаковый resource envelope и чистый старт на каждую пару. "
+            f"Одинаковый resource envelope. {dispatch_note}"
             "Эффективнее та, что держит предложенный ingest без ошибок "
             "и отвечает быстрее на locf/range. "
             "storage_*_p95 показывает, где сидит задержка — в БД или в API."

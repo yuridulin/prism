@@ -62,8 +62,8 @@ func (s *VictoriaMetrics) Write(ctx context.Context, samples []model.Sample) err
 	defer putBuf(buf)
 	for i := range samples {
 		p := &samples[i]
-		// Empty measurement: VM uses the field name as the metric, so locf/range
-		// still query prism_sample{tag_id,quality} like the old Prometheus import.
+		// Canonical ILP for all APIs: empty measurement, quality is a label,
+		// field name prism_sample is the metric. Query match[] is prism_sample{tag_id}.
 		buf.WriteString(",tag_id=")
 		buf.WriteString(strconv.FormatUint(uint64(p.TagID), 10))
 		buf.WriteString(",quality=")

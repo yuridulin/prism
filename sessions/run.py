@@ -1,4 +1,4 @@
-"""Dispatch Prism sessions: one pair at a time, clean start each time."""
+"""Dispatch Prism sessions: by default all DBs stay up while switching storage per backend."""
 
 from __future__ import annotations
 
@@ -21,12 +21,15 @@ from session import (  # noqa: E402
     API_META,
     API_READY,
     API_SERVICE,
+    API_URL,
     LAB_ARCHIVE_END,
     SessionError,
+    backend_stack_services,
     build_comparison,
     draft_conclusions,
     dump_yaml,
     format_comparison,
+    group_pairs_by_backend,
     load_session,
     list_session_ids,
     new_session,
@@ -38,9 +41,12 @@ from session import (  # noqa: E402
     rebuild_catalog,
     save_session,
     session_dir,
+    storage_volume_name,
     utcnow,
+    volume_set_for,
     write_compose_env,
 )
+from preflight import run_preflight  # noqa: E402
 
 COMPOSE_FILES = ["-f", "docker-compose.yml", "-f", "docker-compose.session.yml"]
 
@@ -85,6 +91,133 @@ def http_get(url: str, timeout: float = 5.0) -> tuple[int, str]:
         return exc.code, exc.read().decode("utf-8", errors="replace")
     except Exception as exc:
         raise SessionError(f"request failed {url}: {exc}") from exc
+
+
+def http_post(url: str, payload: dict, timeout: float = 30.0) -> tuple[int, str]:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        raise SessionError(f"request failed {url}: {exc}") from exc
+
+
+def archive_seeded(api_base: str, archive_end: str) -> bool:
+    for tag_id in (1, 9):
+        status, body = http_post(
+            f"{api_base.rstrip('/')}/api/values",
+            {"tagsId": [tag_id], "exact": archive_end},
+        )
+        if status != 200:
+            return False
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return False
+        tags = payload.get("tags") or []
+        if not tags or not (tags[0].get("values") or []):
+            return False
+    return True
+
+
+def wipe_storage_volume(storage: str, volume_set: str, env_file: Path) -> None:
+    compose(["rm", "-sf", storage], env_file, capture=True)
+    name = storage_volume_name(storage, volume_set)
+    subprocess.run(["docker", "volume", "rm", "-f", name], cwd=ROOT, check=False, capture_output=True)
+
+
+def should_reset_storage_volume(session: dict) -> bool:
+    what = session.get("what") or {}
+    if what.get("reuse_volumes"):
+        return False
+    return volume_set_for(session) != "data"
+
+
+def resolve_skip_seed(session: dict, pair: dict) -> bool:
+    what = session.get("what") or {}
+    if what.get("skip_seed") or what.get("reuse_volumes"):
+        return True
+    profile = (what.get("load") or {}).get("profile")
+    if profile != "query-mix" and volume_set_for(session) != "data":
+        return False
+    archive_end = str(what.get("archive_end") or LAB_ARCHIVE_END)
+    if archive_seeded(API_URL[pair["backend"]], archive_end):
+        return True
+    return False
+
+
+def update_compose_seed_flag(env_file: Path, skip_seed: bool) -> None:
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    out = []
+    replaced = False
+    for line in lines:
+        if line.startswith("ARCHIVE_SEED="):
+            out.append(f"ARCHIVE_SEED={'0' if skip_seed else '1'}")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        out.append(f"ARCHIVE_SEED={'0' if skip_seed else '1'}")
+    env_file.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def recreate_api(backend: str, env_file: Path) -> None:
+    compose_checked(
+        ["up", "-d", "--build", "--force-recreate", "--no-deps", API_SERVICE[backend]],
+        env_file,
+        capture=False,
+    )
+
+
+def ensure_backend_stack(session: dict, backend: str, env_file: Path) -> None:
+    services = backend_stack_services(backend)
+    compose_checked(["up", "-d", "--build", *services], env_file, capture=False)
+    wait_ready("http://127.0.0.1:9090/-/ready")
+
+
+def ensure_infra_for_preflight(session: dict, volume_set: str, storages: list[str]) -> None:
+    pair = normalize_pair({"backend": "go", "storage": storages[0]})
+    env_file = write_compose_env(session, pair)
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    if not any(line.startswith("PRISM_VOLUME_SET=") for line in lines):
+        lines.append(f"PRISM_VOLUME_SET={volume_set}")
+    else:
+        lines = [
+            (f"PRISM_VOLUME_SET={volume_set}" if line.startswith("PRISM_VOLUME_SET=") else line)
+            for line in lines
+        ]
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    services = ["nats", "prometheus", *storages]
+    if "timescaledb" in storages:
+        services.append("postgres-exporter")
+    compose_checked(["up", "-d", "--build", *services], env_file, capture=False)
+    wait_ready("http://127.0.0.1:9090/-/ready")
+
+
+def preflight_recreate_api(backend: str, storage: str, session: dict) -> None:
+    pair = normalize_pair({"backend": backend, "storage": storage})
+    env_file = write_compose_env(session, pair)
+    recreate_api(backend, env_file)
+
+
+def run_session_preflight(session: dict) -> None:
+    def recreate(backend: str, storage: str) -> None:
+        preflight_recreate_api(backend, storage, session)
+
+    run_preflight(
+        session,
+        wait_ready=wait_ready,
+        recreate_api=recreate,
+        ensure_infra=ensure_infra_for_preflight,
+    )
 
 
 def wait_ready(url: str, timeout: int = 180) -> None:
@@ -272,38 +405,46 @@ def collect_meta(backend: str) -> dict:
         return {"error": str(exc)}
 
 
-def run_pair(session: dict, pair: dict) -> dict:
+def measure_pair(session: dict, pair: dict, *, stack_ready: bool = False) -> dict:
     slug = pair_slug(pair)
     work = pair_dir(session["id"], pair)
     env_file = write_compose_env(session, pair)
-    services = pair_services(pair)
     keep = bool((session.get("what") or {}).get("reuse_volumes"))
+    volume_set = volume_set_for(session)
+    skip_seed = resolve_skip_seed(session, pair)
+    update_compose_seed_flag(env_file, skip_seed)
     record = {
         "backend": pair["backend"],
         "storage": pair["storage"],
         "status": "running",
         "when": {"started_at": utcnow(), "finished_at": None},
-        "services": services,
+        "services": pair_services(pair),
         "reuse_volumes": keep,
+        "volume_set": volume_set,
+        "skip_seed": skip_seed,
+        "dispatch": (session.get("what") or {}).get("dispatch") or "by-backend",
     }
-    if keep:
-        print(f"pair {slug}: reuse -> up {', '.join(services)}", flush=True)
-    else:
-        print(f"pair {slug}: wipe -> up {', '.join(services)}", flush=True)
-        wipe_stack(env_file)
     try:
-        compose_checked(["up", "-d", "--build", *services], env_file, capture=False)
-        if keep:
-            compose_checked(
-                ["up", "-d", "--build", "--force-recreate", "--no-deps", API_SERVICE[pair["backend"]]],
-                env_file,
-                capture=False,
-            )
-        wait_ready(API_READY[pair["backend"]])
-        wait_ready("http://127.0.0.1:9090/-/ready")
-        if keep:
-            # Host :808x can be up before Docker DNS publishes the API alias.
-            time.sleep(5)
+        if should_reset_storage_volume(session):
+            print(f"pair {slug}: reset volume {storage_volume_name(pair['storage'], volume_set)}", flush=True)
+            compose(["stop", pair["storage"]], env_file, capture=True)
+            wipe_storage_volume(pair["storage"], volume_set, env_file)
+            compose_checked(["up", "-d", pair["storage"]], env_file, capture=False)
+        if not stack_ready:
+            if keep:
+                print(f"pair {slug}: reuse -> up {', '.join(record['services'])}", flush=True)
+            else:
+                print(f"pair {slug}: wipe -> up {', '.join(record['services'])}", flush=True)
+                wipe_stack(env_file)
+            compose_checked(["up", "-d", "--build", *record["services"]], env_file, capture=False)
+            wait_ready(API_READY[pair["backend"]])
+            wait_ready("http://127.0.0.1:9090/-/ready")
+            if keep:
+                time.sleep(5)
+        else:
+            print(f"pair {slug}: measure on {pair['storage']}", flush=True)
+        if skip_seed:
+            print(f"pair {slug}: archive seed skipped", flush=True)
         window = session["what"]["duration"]
         print(f"pair {slug}: load {window}", flush=True)
         proc = compose(
@@ -336,15 +477,54 @@ def run_pair(session: dict, pair: dict) -> dict:
     finally:
         record["when"]["finished_at"] = utcnow()
         dump_yaml(work / "pair.yaml", record)
-        if keep:
-            print(f"pair {slug}: done (volumes kept)", flush=True)
-        else:
-            print(f"pair {slug}: cleanup", flush=True)
-            wipe_stack(env_file)
     return record
 
 
+def run_pair_isolated(session: dict, pair: dict) -> dict:
+    slug = pair_slug(pair)
+    keep = bool((session.get("what") or {}).get("reuse_volumes"))
+    record = measure_pair(session, pair, stack_ready=False)
+    if keep:
+        print(f"pair {slug}: done (volumes kept)", flush=True)
+    else:
+        env_file = write_compose_env(session, pair)
+        print(f"pair {slug}: cleanup", flush=True)
+        wipe_stack(env_file)
+    return record
+
+
+def run_backend_group(session: dict, backend: str, pairs: list[dict]) -> list[dict]:
+    keep = bool((session.get("what") or {}).get("reuse_volumes"))
+    print(f"backend {backend}: up all DBs ({len(pairs)} storages)", flush=True)
+    records: list[dict] = []
+    for index, pair in enumerate(pairs):
+        env_file = write_compose_env(session, pair)
+        if index == 0:
+            if not keep:
+                wipe_stack(env_file)
+            ensure_backend_stack(session, backend, env_file)
+        else:
+            recreate_api(pair["backend"], env_file)
+        wait_ready(API_READY[pair["backend"]])
+        if index > 0 or keep:
+            time.sleep(5)
+        records.append(measure_pair(session, pair, stack_ready=True))
+    if not keep:
+        env_file = write_compose_env(session, pairs[0])
+        print(f"backend {backend}: cleanup stack", flush=True)
+        wipe_stack(env_file)
+    return records
+
+
+def run_pair(session: dict, pair: dict) -> dict:
+    dispatch = (session.get("what") or {}).get("dispatch") or "by-backend"
+    if dispatch == "by-pair":
+        return run_pair_isolated(session, pair)
+    raise SessionError("run_pair() called in by-backend mode; use run_backend_group()")
+
+
 def cmd_new(args: argparse.Namespace) -> int:
+    dispatch = "by-pair" if args.isolated_pairs else (args.dispatch or "by-backend")
     session = new_session(
         why=args.why,
         profile=args.profile,
@@ -353,9 +533,12 @@ def cmd_new(args: argparse.Namespace) -> int:
         pairs=args.pairs,
         reuse_volumes=args.keep,
         archive_end=args.archive_end,
+        dispatch=dispatch,
+        skip_preflight=args.skip_preflight,
     )
     path = save_session(session)
     print(f"created {session['id']} ({path})")
+    print(f"dispatch: {session['what']['dispatch']}  volume_set: {volume_set_for(session)}")
     print("pairs: " + ", ".join(pair_slug(p) for p in session["what"]["pairs"]))
     if args.run:
         return cmd_run(
@@ -365,17 +548,22 @@ def cmd_new(args: argparse.Namespace) -> int:
                 only_pair=None,
                 fail_fast=args.fail_fast,
                 keep=args.keep,
+                skip_preflight=args.skip_preflight,
             )
         )
     return 0
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    session_id = args.id or _latest_planned()
-    session = load_session(session_id)
-    pairs = [normalize_pair(p) for p in session["what"]["pairs"]]
-    if not pairs:
-        raise SessionError("session has no pairs")
+def _apply_run_flags(session: dict, args: argparse.Namespace) -> None:
+    if getattr(args, "keep", False):
+        session["what"]["reuse_volumes"] = True
+        session["what"]["skip_seed"] = True
+        session["what"].setdefault("archive_end", LAB_ARCHIVE_END)
+    if getattr(args, "skip_preflight", False):
+        session["what"]["skip_preflight"] = True
+
+
+def _dispatch_pairs(session: dict, args: argparse.Namespace, pairs: list[dict]) -> int:
     slugs = [pair_slug(p) for p in pairs]
     start_at = 0
     stop_at = len(pairs)
@@ -388,24 +576,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         if args.from_pair not in slugs:
             raise SessionError(f"unknown pair {args.from_pair!r}")
         start_at = slugs.index(args.from_pair)
-    if getattr(args, "keep", False):
-        session["what"]["reuse_volumes"] = True
-        session["what"]["skip_seed"] = True
-        session["what"].setdefault("archive_end", LAB_ARCHIVE_END)
-    session["status"] = "running"
-    session["when"]["started_at"] = session["when"].get("started_at") or utcnow()
-    session.setdefault("results", {}).setdefault("pairs", {})
-    save_session(session)
-    print(
-        f"dispatch {session_id} duration={session['what']['duration']} "
-        f"profile={session['what']['load']['profile']} pairs={', '.join(slugs[start_at:stop_at])}",
-        flush=True,
-    )
+    selected = pairs[start_at:stop_at]
+    dispatch = (session.get("what") or {}).get("dispatch") or "by-backend"
     failed = False
-    try:
-        for pair in pairs[start_at:stop_at]:
+
+    if dispatch == "by-pair":
+        for pair in selected:
             slug = pair_slug(pair)
-            record = run_pair(session, pair)
+            record = run_pair_isolated(session, pair)
             session["results"]["pairs"][slug] = record
             session["results"]["comparison"] = build_comparison(session)
             session["conclusions"] = draft_conclusions(session)
@@ -415,6 +593,48 @@ def cmd_run(args: argparse.Namespace) -> int:
                 failed = True
                 if args.fail_fast:
                     raise SessionError(f"pair {slug} failed, stopping")
+        return 1 if failed else 0
+
+    for backend, group in group_pairs_by_backend(selected):
+        records = run_backend_group(session, backend, group)
+        for record in records:
+            slug = pair_slug({"backend": record["backend"], "storage": record["storage"]})
+            session["results"]["pairs"][slug] = record
+            session["results"]["comparison"] = build_comparison(session)
+            session["conclusions"] = draft_conclusions(session)
+            save_session(session)
+            write_comparison(session)
+            if record.get("status") != "completed":
+                failed = True
+                if args.fail_fast:
+                    raise SessionError(f"pair {slug} failed, stopping")
+    return 1 if failed else 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    session_id = args.id or _latest_planned()
+    session = load_session(session_id)
+    pairs = [normalize_pair(p) for p in session["what"]["pairs"]]
+    if not pairs:
+        raise SessionError("session has no pairs")
+    _apply_run_flags(session, args)
+    session["status"] = "running"
+    session["when"]["started_at"] = session["when"].get("started_at") or utcnow()
+    session.setdefault("results", {}).setdefault("pairs", {})
+    save_session(session)
+    slugs = [pair_slug(p) for p in pairs]
+    print(
+        f"dispatch {session_id} mode={(session.get('what') or {}).get('dispatch')} "
+        f"volume_set={volume_set_for(session)} "
+        f"duration={session['what']['duration']} "
+        f"profile={session['what']['load']['profile']} pairs={', '.join(slugs)}",
+        flush=True,
+    )
+    failed = False
+    try:
+        if not session.get("what", {}).get("skip_preflight"):
+            run_session_preflight(session)
+        failed = bool(_dispatch_pairs(session, args, pairs))
         stored = session.get("results", {}).get("pairs") or {}
         any_failed = failed or any(
             (stored.get(pair_slug(normalize_pair(p))) or {}).get("status") != "completed"
@@ -438,6 +658,21 @@ def cmd_run(args: argparse.Namespace) -> int:
             wipe_stack()
         print(f"failed {session_id}: {exc}", file=sys.stderr)
         return 1
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    if args.id:
+        session = load_session(args.id)
+    else:
+        session = new_session(
+            why="preflight-only",
+            profile=args.profile,
+            pairs=args.pairs,
+            skip_preflight=False,
+        )
+    _apply_run_flags(session, args)
+    run_session_preflight(session)
+    return 0
 
 
 def _latest_planned() -> str:
@@ -501,15 +736,37 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--fail-fast", action="store_true")
     new.add_argument("--keep", action="store_true", help="reuse volumes, skip wipe and archive seed")
     new.add_argument("--archive-end", help="UTC end of the existing archive (required for --keep query-mix)")
+    new.add_argument(
+        "--isolated-pairs",
+        action="store_true",
+        help="legacy dispatch: one pair at a time with full wipe between pairs",
+    )
+    new.add_argument(
+        "--dispatch",
+        choices=("by-backend", "by-pair"),
+        help="by-backend: all DBs up per API; by-pair: isolated wipe per pair",
+    )
+    new.add_argument("--skip-preflight", action="store_true", help="do not run contract parity before load")
     new.set_defaults(func=cmd_new)
 
-    run = sub.add_parser("run", help="dispatch pairs: clean start, run, record, wipe")
+    run = sub.add_parser("run", help="dispatch pairs and record scorecard")
     run.add_argument("id", nargs="?", help="session id; defaults to the latest planned")
     run.add_argument("--from-pair", help="resume from this pair slug, e.g. python-influxdb")
     run.add_argument("--only-pair", help="run a single pair slug and keep the rest of the session")
     run.add_argument("--fail-fast", action="store_true")
     run.add_argument("--keep", action="store_true", help="reuse volumes, skip wipe and archive seed")
+    run.add_argument("--skip-preflight", action="store_true", help="do not run contract parity before load")
     run.set_defaults(func=cmd_run)
+
+    preflight = sub.add_parser("preflight", help="contract parity across backend x storage")
+    preflight.add_argument("id", nargs="?", help="optional session id for volume_set/profile context")
+    preflight.add_argument("--profile", default="query-mix", help="profile for volume_set selection")
+    preflight.add_argument(
+        "--pairs",
+        help="comma-separated backend:storage list (default: full 4x5 from defaults)",
+    )
+    preflight.add_argument("--keep", action="store_true", help="use data volume set without wipe")
+    preflight.set_defaults(func=cmd_preflight)
 
     listing = sub.add_parser("list", help="show the session catalog")
     listing.set_defaults(func=cmd_list)

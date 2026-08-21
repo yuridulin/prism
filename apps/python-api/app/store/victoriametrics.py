@@ -1,10 +1,8 @@
-import csv
-import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.models import Sample, Tag
 from app.store.catalog import CatalogMem
-from app.store.net import ilp_float, new_client, raise_status, unix_ns
+from app.store.net import _utc, ilp_float, new_client, raise_status, unix_ns
 
 _HTTP = None
 
@@ -37,8 +35,9 @@ class VictoriaMetricsStore:
     async def write(self, samples: list[Sample]) -> None:
         if not samples:
             return
+        # Same ILP as Go: empty measurement, quality label, field prism_sample.
         parts = [
-            f"prism_sample,tag_id={s.tag_id},quality={s.quality} value={ilp_float(s.value)} {unix_ns(s.ts)}\n"
+            f",tag_id={s.tag_id},quality={s.quality} prism_sample={ilp_float(s.value)} {unix_ns(s.ts)}\n"
             for s in samples
         ]
         resp = await _http().post(
@@ -68,38 +67,42 @@ class VictoriaMetricsStore:
     ) -> tuple[list[Sample], list[Sample]]:
         if not tag_ids:
             return [], []
-        resp = await _http().get(
-            f"{self._url}/api/v1/export/csv",
-            params={
-                "match[]": f'prism_sample{{tag_id=~"{_tag_re(tag_ids)}"}}',
-                "start": int(export_start.timestamp()),
-                "end": int(export_end.timestamp()),
-                "format": "tag_id,quality,__value__,__timestamp__:unix_ms",
-            },
-        )
-        raise_status(resp, "vm export")
+        start = _utc(from_)
+        stop = _utc(to)
+        params = {
+            "match[]": f'prism_sample{{tag_id=~"{_tag_re(tag_ids)}"}}',
+            "start": int(_utc(export_start).timestamp()),
+            "end": int(_utc(export_end).timestamp()),
+            "format": "tag_id,quality,__value__,__timestamp__:unix_ms",
+        }
         best: dict[int, Sample] = {}
         mid: list[Sample] = []
-        reader = csv.reader(io.StringIO(resp.text))
-        for row in reader:
-            if len(row) < 4 or row[0] == "tag_id":
-                continue
-            try:
-                tag_id = int(row[0])
-            except ValueError:
-                continue
-            quality = int(float(row[1] or 0))
-            val = float(row[2] or 0)
-            when = datetime.fromtimestamp(int(row[3]) / 1000, tz=from_.tzinfo)
-            if when <= from_:
-                prev = best.get(tag_id)
-                if prev is None or when > prev.ts:
-                    best[tag_id] = Sample(
-                        ts=when, tag_id=tag_id, value=val, quality=quality, carried=with_mid
-                    )
-                continue
-            if with_mid and when <= to:
-                mid.append(Sample(ts=when, tag_id=tag_id, value=val, quality=quality))
+        async with _http().stream("GET", f"{self._url}/api/v1/export/csv", params=params) as resp:
+            if resp.status_code >= 300:
+                body = (await resp.aread())[:500]
+                raise RuntimeError(f"vm export {resp.status_code}: {body!r}")
+            async for line in resp.aiter_lines():
+                if not line or line.startswith("tag_id"):
+                    continue
+                row = line.split(",")
+                if len(row) < 4:
+                    continue
+                try:
+                    tag_id = int(row[0])
+                except ValueError:
+                    continue
+                quality = int(float(row[1] or 0))
+                val = float(row[2] or 0)
+                when = datetime.fromtimestamp(int(row[3]) / 1000, tz=timezone.utc)
+                if when <= start:
+                    prev = best.get(tag_id)
+                    if prev is None or when > prev.ts:
+                        best[tag_id] = Sample(
+                            ts=when, tag_id=tag_id, value=val, quality=quality, carried=with_mid
+                        )
+                    continue
+                if with_mid and when <= stop:
+                    mid.append(Sample(ts=when, tag_id=tag_id, value=val, quality=quality))
         seed = [best[tag_id] for tag_id in tag_ids if tag_id in best]
         return seed, mid
 

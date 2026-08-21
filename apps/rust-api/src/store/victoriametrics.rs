@@ -19,7 +19,7 @@ impl VictoriaMetrics {
     pub fn new(base: &str) -> Self {
         let base = base.trim_end_matches('/').to_string();
         Self {
-            write_url: format!("{base}/write?precision=ms"),
+            write_url: format!("{base}/write?precision=ns"),
             base,
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(15))
@@ -147,9 +147,10 @@ impl Store for VictoriaMetrics {
         }
         let mut buf = String::with_capacity(samples.len() * 48);
         for p in samples {
-            let _ = write!(buf, "prism,tag_id={},quality={} sample=", p.tag_id, p.quality);
+            // Same ILP as Go: empty measurement, quality label, field prism_sample.
+            let _ = write!(buf, ",tag_id={},quality={} prism_sample=", p.tag_id, p.quality);
             append_ilp_float(&mut buf, p.value);
-            let _ = write!(buf, " {}\n", p.ts.timestamp_millis());
+            let _ = write!(buf, " {}\n", p.ts.timestamp_nanos_opt().unwrap_or(0));
         }
         let resp = self.client.post(&self.write_url).body(buf).send().await?;
         let status = resp.status();
