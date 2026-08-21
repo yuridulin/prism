@@ -1,0 +1,118 @@
+backend: python
+storage: influxdb
+status: completed
+when:
+  started_at: '2026-08-21T17:43:08Z'
+  finished_at: '2026-08-21T17:43:11Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- clickhouse
+- questdb
+- influxdb
+- victoriametrics
+- postgres-exporter
+- python-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: parallel-by-backend
+api_container: prism-p172956-python-influxdb
+generator:
+  profile: query-mix
+  written: 0
+  queries: 1043
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 300.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: python
+  storage: influxdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: python
+  storage: influxdb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 3.895833333333332
+  range_p95_seconds: 6.697580645161288
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 3.895833333333332
+  storage_range_p95_seconds: 6.697580645161288
+  api_p95_seconds: 6.37109375
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-generator-run-6810391155de
+    cpu: 2.57%
+    mem: 83.75MiB
+  - name: prism-python-api-1
+    cpu: 100.92%
+    mem: 209.4MiB
+  - name: prism-prometheus-1
+    cpu: 0.57%
+    mem: 149.1MiB
+  - name: prism-p172956-python-vm
+    cpu: 0.11%
+    mem: 163.3MiB
+  - name: prism-p172956-python-influxdb
+    cpu: 2.10%
+    mem: 180MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 1.578MiB
+  - name: prism-csharp-api-1
+    cpu: 0.01%
+    mem: 22.54MiB
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 20.52MiB
+  - name: prism-influxdb-1
+    cpu: 2.74%
+    mem: 248.7MiB
+  - name: prism-nats-1
+    cpu: 0.07%
+    mem: 16.83MiB
+  - name: prism-timescaledb-1
+    cpu: 0.01%
+    mem: 32.96MiB
+  - name: prism-clickhouse-1
+    cpu: 9.04%
+    mem: 384.6MiB
+  - name: prism-questdb-1
+    cpu: 3.94%
+    mem: 145.5MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.09%
+    mem: 36.92MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 20.34MiB
+  api:
+    cpu: 2.10%
+    mem: 180MiB
+  storage:
+    cpu: 2.74%
+    mem: 248.7MiB
+storage_size:
+  bytes: 106219072
+  mib: 101.3
+  volume: prism_influx_data
+  path: /var/lib/influxdb2

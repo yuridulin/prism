@@ -1,0 +1,110 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: go-api
+    static_configs:
+      - targets: ["go-api:8081"]
+        labels:
+          backend: go
+          layer: api
+
+  - job_name: python-api
+    static_configs:
+      - targets: ["python-api:8082"]
+        labels:
+          backend: python
+          layer: api
+
+  - job_name: csharp-api
+    static_configs:
+      - targets: ["csharp-api:8083"]
+        labels:
+          backend: csharp
+          layer: api
+
+  - job_name: rust-api
+    static_configs:
+      - targets: ["rust-api:8084"]
+        labels:
+          backend: rust
+          layer: api
+
+  - job_name: timescaledb
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          storage: timescaledb
+          layer: db
+
+  - job_name: clickhouse
+    static_configs:
+      - targets: ["clickhouse:9363"]
+        labels:
+          storage: clickhouse
+          layer: db
+
+  - job_name: questdb
+    static_configs:
+      - targets: ["questdb:9003"]
+        labels:
+          storage: questdb
+          layer: db
+
+  - job_name: influxdb
+    static_configs:
+      - targets: ["influxdb:8086"]
+        labels:
+          storage: influxdb
+          layer: db
+
+  - job_name: victoriametrics
+    static_configs:
+      - targets: ["victoriametrics:8428"]
+        labels:
+          storage: victoriametrics
+          layer: db
+
+  - job_name: nats
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["nats:8222"]
+        labels:
+          layer: bus
+
+  - job_name: parallel-csharp-timescaledb
+    static_configs:
+      - targets: ["prism-p172956-csharp-timescaledb:8083"]
+        labels:
+          backend: "csharp"
+          storage: "timescaledb"
+          layer: api
+  - job_name: parallel-csharp-clickhouse
+    static_configs:
+      - targets: ["prism-p172956-csharp-clickhouse:8083"]
+        labels:
+          backend: "csharp"
+          storage: "clickhouse"
+          layer: api
+  - job_name: parallel-csharp-questdb
+    static_configs:
+      - targets: ["prism-p172956-csharp-questdb:8083"]
+        labels:
+          backend: "csharp"
+          storage: "questdb"
+          layer: api
+  - job_name: parallel-csharp-influxdb
+    static_configs:
+      - targets: ["prism-p172956-csharp-influxdb:8083"]
+        labels:
+          backend: "csharp"
+          storage: "influxdb"
+          layer: api
+  - job_name: parallel-csharp-victoriametrics
+    static_configs:
+      - targets: ["prism-p172956-csharp-vm:8083"]
+        labels:
+          backend: "csharp"
+          storage: "victoriametrics"
+          layer: api

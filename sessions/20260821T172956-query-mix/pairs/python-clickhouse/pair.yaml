@@ -1,0 +1,124 @@
+backend: python
+storage: clickhouse
+status: completed
+when:
+  started_at: '2026-08-21T17:43:01Z'
+  finished_at: '2026-08-21T17:43:04Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- clickhouse
+- questdb
+- influxdb
+- victoriametrics
+- postgres-exporter
+- python-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: parallel-by-backend
+api_container: prism-p172956-python-clickhouse
+generator:
+  profile: query-mix
+  written: 0
+  queries: 1639
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 300.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: python
+  storage: clickhouse
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: python
+  storage: clickhouse
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 1.2789833484132258
+  range_p95_seconds: 2.294798015111206
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 1.278997546476983
+  storage_range_p95_seconds: 2.2947997968688916
+  api_p95_seconds: 2.3621993865514543
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-generator-run-6810391155de
+    cpu: 8.88%
+    mem: 113.2MiB
+  - name: prism-python-api-1
+    cpu: 43.07%
+    mem: 217.2MiB
+  - name: prism-prometheus-1
+    cpu: 1.28%
+    mem: 147.1MiB
+  - name: prism-p172956-python-vm
+    cpu: 0.13%
+    mem: 162.5MiB
+  - name: prism-p172956-python-influxdb
+    cpu: 101.17%
+    mem: 252.8MiB
+  - name: prism-p172956-python-questdb
+    cpu: 0.31%
+    mem: 38.98MiB
+  - name: prism-p172956-python-clickhouse
+    cpu: 0.09%
+    mem: 223.9MiB
+  - name: prism-rust-api-1
+    cpu: 0.04%
+    mem: 1.824MiB
+  - name: prism-csharp-api-1
+    cpu: 0.37%
+    mem: 21.68MiB
+  - name: prism-go-api-1
+    cpu: 0.25%
+    mem: 20.64MiB
+  - name: prism-influxdb-1
+    cpu: 0.06%
+    mem: 246.6MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 16.59MiB
+  - name: prism-timescaledb-1
+    cpu: 0.00%
+    mem: 32.46MiB
+  - name: prism-clickhouse-1
+    cpu: 12.98%
+    mem: 291.5MiB
+  - name: prism-questdb-1
+    cpu: 9.36%
+    mem: 137MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.09%
+    mem: 36.77MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 20.3MiB
+  api:
+    cpu: 0.09%
+    mem: 223.9MiB
+  storage:
+    cpu: 12.98%
+    mem: 291.5MiB
+storage_size:
+  bytes: 232160897
+  mib: 221.4
+  volume: prism_clickhouse_data
+  path: /var/lib/clickhouse

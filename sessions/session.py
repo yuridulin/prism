@@ -48,6 +48,9 @@ API_HOST = {
     "csharp": "http://127.0.0.1:8083",
     "rust": "http://127.0.0.1:8084",
 }
+API_CONTAINER_PORT = {"go": 8081, "python": 8082, "csharp": 8083, "rust": 8084}
+PARALLEL_HOST_PORT_BASE = {"go": 8290, "python": 8390, "csharp": 8490, "rust": 8590}
+DISPATCH_MODES = ("parallel-by-backend", "by-backend", "by-pair")
 API_READY = {
     "go": "http://127.0.0.1:8081/readyz",
     "python": "http://127.0.0.1:8082/readyz",
@@ -167,8 +170,25 @@ def pair_services(pair: dict) -> list[str]:
 
 
 def backend_stack_services(backend: str) -> list[str]:
-    services = ["nats", *ALL_STORAGES, API_SERVICE[backend], "prometheus", "postgres-exporter"]
-    return services
+    return storage_stack_services() + [API_SERVICE[backend]]
+
+
+def storage_stack_services() -> list[str]:
+    return ["nats", "prometheus", *ALL_STORAGES, "postgres-exporter"]
+
+
+def parallel_host_port(backend: str, storage: str) -> int:
+    if storage not in ALL_STORAGES:
+        raise SessionError(f"unknown storage {storage!r}")
+    return PARALLEL_HOST_PORT_BASE[backend] + ALL_STORAGES.index(storage) + 1
+
+
+def parallel_container_name(session_id: str, backend: str, storage: str) -> str:
+    token = session_id.split("-", 1)[0]
+    short = token[-6:] if len(token) >= 6 else token
+    storage_short = storage.replace("victoriametrics", "vm")
+    name = f"prism-p{short}-{backend}-{storage_short}"
+    return name[:63].rstrip("-")
 
 
 def group_pairs_by_backend(pairs: list[dict]) -> list[tuple[str, list[dict]]]:
@@ -190,7 +210,7 @@ def new_session(
     created_at: str | None = None,
     reuse_volumes: bool = False,
     archive_end: str | None = None,
-    dispatch: str = "by-backend",
+    dispatch: str = "parallel-by-backend",
     volume_set: str | None = None,
     skip_preflight: bool = False,
 ) -> dict:
@@ -207,9 +227,9 @@ def new_session(
     resolved = parse_pairs(pairs if pairs is not None else defaults.get("pairs"))
     if not resolved:
         raise SessionError("session must list at least one pair")
-    dispatch_mode = dispatch or defaults.get("dispatch") or "by-backend"
-    if dispatch_mode not in {"by-backend", "by-pair"}:
-        raise SessionError("dispatch must be by-backend or by-pair")
+    dispatch_mode = dispatch or defaults.get("dispatch") or "parallel-by-backend"
+    if dispatch_mode not in DISPATCH_MODES:
+        raise SessionError(f"dispatch must be one of {DISPATCH_MODES}")
     profile_name = load["profile"]
     vol_set = volume_set or volume_set_for_profile(profile_name)
     created = created_at or utcnow()
@@ -415,12 +435,17 @@ def build_comparison(session: dict) -> dict:
     pairs = (session.get("results") or {}).get("pairs") or {}
     rows = [pair_scorecard(slug, record) for slug, record in pairs.items()]
     read_heavy = profile == "query-mix"
-    dispatch = what.get("dispatch") or "by-backend"
-    dispatch_note = (
-        "На каждый backend все БД подняты сразу; между storage только переключение API. "
-        if dispatch == "by-backend"
-        else "Каждая пара — отдельный чистый старт. "
-    )
+    dispatch = what.get("dispatch") or "parallel-by-backend"
+    if dispatch == "parallel-by-backend":
+        dispatch_note = (
+            "На каждый backend — параллельно N копий API (по одной на storage), общие БД, один 5m query. "
+        )
+    elif dispatch == "by-backend":
+        dispatch_note = (
+            "На каждый backend все БД подняты сразу; между storage только переключение API. "
+        )
+    else:
+        dispatch_note = "Каждая пара — отдельный чистый старт. "
     if read_heavy:
         how = (
             f"Одинаковый resource envelope. {dispatch_note}"

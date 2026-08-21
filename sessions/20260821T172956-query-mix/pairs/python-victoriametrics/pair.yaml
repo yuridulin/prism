@@ -1,0 +1,115 @@
+backend: python
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-21T17:43:11Z'
+  finished_at: '2026-08-21T17:43:14Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- clickhouse
+- questdb
+- influxdb
+- victoriametrics
+- postgres-exporter
+- python-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: parallel-by-backend
+api_container: prism-p172956-python-vm
+generator:
+  profile: query-mix
+  written: 0
+  queries: 1435
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 300.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: python
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: python
+  storage: victoriametrics
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 1.7
+  range_p95_seconds: 4.0018115942028984
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 1.7
+  storage_range_p95_seconds: 4.0018115942028984
+  api_p95_seconds: 4.248893805309738
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-generator-run-6810391155de
+    cpu: 2.59%
+    mem: 101.1MiB
+  - name: prism-python-api-1
+    cpu: 100.30%
+    mem: 205.4MiB
+  - name: prism-prometheus-1
+    cpu: 1.68%
+    mem: 150.8MiB
+  - name: prism-p172956-python-vm
+    cpu: 0.11%
+    mem: 162.6MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 1.578MiB
+  - name: prism-csharp-api-1
+    cpu: 0.02%
+    mem: 23.78MiB
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 21.78MiB
+  - name: prism-influxdb-1
+    cpu: 1.47%
+    mem: 256.2MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 17.08MiB
+  - name: prism-timescaledb-1
+    cpu: 0.92%
+    mem: 33.52MiB
+  - name: prism-clickhouse-1
+    cpu: 4.66%
+    mem: 401.3MiB
+  - name: prism-questdb-1
+    cpu: 1.05%
+    mem: 145.4MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.16%
+    mem: 37.31MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.58%
+    mem: 24.07MiB
+  api:
+    cpu: 0.11%
+    mem: 162.6MiB
+  storage:
+    cpu: 0.16%
+    mem: 37.31MiB
+storage_size:
+  bytes: 15483278
+  mib: 14.8
+  volume: prism_vm_data
+  path: /victoria-metrics-data

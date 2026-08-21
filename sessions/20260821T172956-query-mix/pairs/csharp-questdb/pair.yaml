@@ -1,0 +1,121 @@
+backend: csharp
+storage: questdb
+status: completed
+when:
+  started_at: '2026-08-21T17:49:01Z'
+  finished_at: '2026-08-21T17:49:03Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- clickhouse
+- questdb
+- influxdb
+- victoriametrics
+- postgres-exporter
+- csharp-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: parallel-by-backend
+api_container: prism-p172956-csharp-questdb
+generator:
+  profile: query-mix
+  written: 0
+  queries: 4481
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 300.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: csharp
+  storage: questdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: csharp
+  storage: questdb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.004971096096096096
+  range_p95_seconds: 0.009318840579710122
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.0049686093046523265
+  storage_range_p95_seconds: 0.009308823529411744
+  api_p95_seconds: 0.008778776978417266
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-generator-run-8f6b46ae9af9
+    cpu: 2.08%
+    mem: 15.73MiB
+  - name: prism-python-api-1
+    cpu: 3.71%
+    mem: 55.82MiB
+  - name: prism-prometheus-1
+    cpu: 0.82%
+    mem: 98.32MiB
+  - name: prism-p172956-csharp-vm
+    cpu: 0.02%
+    mem: 132.5MiB
+  - name: prism-p172956-csharp-influxdb
+    cpu: 0.02%
+    mem: 164MiB
+  - name: prism-p172956-csharp-questdb
+    cpu: 1.09%
+    mem: 55.79MiB
+  - name: prism-rust-api-1
+    cpu: 0.02%
+    mem: 2.156MiB
+  - name: prism-csharp-api-1
+    cpu: 0.01%
+    mem: 43.6MiB
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 14.78MiB
+  - name: prism-influxdb-1
+    cpu: 1.08%
+    mem: 177.7MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 14.35MiB
+  - name: prism-timescaledb-1
+    cpu: 8.11%
+    mem: 66.17MiB
+  - name: prism-clickhouse-1
+    cpu: 5.81%
+    mem: 552.3MiB
+  - name: prism-questdb-1
+    cpu: 24.78%
+    mem: 148.1MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.13%
+    mem: 44.11MiB
+  - name: prism-postgres-exporter-1
+    cpu: 2.69%
+    mem: 21.16MiB
+  api:
+    cpu: 1.09%
+    mem: 55.79MiB
+  storage:
+    cpu: 24.78%
+    mem: 148.1MiB
+storage_size:
+  bytes: 45721220
+  mib: 43.6
+  volume: prism_questdb_data
+  path: /var/lib/questdb

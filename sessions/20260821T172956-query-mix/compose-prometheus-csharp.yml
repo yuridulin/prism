@@ -1,0 +1,4 @@
+services:
+  prometheus:
+    volumes:
+      - ./sessions/20260821T172956-query-mix/prometheus-csharp.yml:/etc/prometheus/prometheus.yml:ro

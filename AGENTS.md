@@ -4,7 +4,7 @@
 
 ## Сессии
 
-- По умолчанию **by-backend**: на каждый API поднимаются **все 5 БД сразу**, между storage только переключение `PRISM_STORAGE` и recreate API. Legacy: `--isolated-pairs` / `dispatch: by-pair` — wipe на каждую пару.
+- По умолчанию **parallel-by-backend**: на каждый API **N параллельных копий** (по одной на storage), общие БД, **один** 5m query на все пары backend-а. `by-backend` — те же БД, но API одно, storage переключается по очереди. Legacy: `--isolated-pairs` / `by-pair`.
 - **Volume sets** (суффикс `PRISM_VOLUME_SET`): `data` — query-mix lab (существующие тома `prism_*_data`), `write` — write-ceiling/iot-steady/burst/high-cardinality, `mixed` — sinus-like*. Запись не трогает lab-тома.
 - **Seed**: для query-mix на томе `data` сид пропускается, если архив уже есть (locf tag 1 и 9 на `ARCHIVE_END`). Явно: `--keep` или `skip_seed: true`.
 - **Preflight** перед `run`: `python sessions/run.py preflight` или автоматически в `run` — write/locf/range на probe-тегах 900001+; все 4 API должны совпасть на каждой БД. `--skip-preflight` только если осознанно.

@@ -1,0 +1,127 @@
+backend: python
+storage: timescaledb
+status: completed
+when:
+  started_at: '2026-08-21T17:42:57Z'
+  finished_at: '2026-08-21T17:43:01Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- clickhouse
+- questdb
+- influxdb
+- victoriametrics
+- postgres-exporter
+- python-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: parallel-by-backend
+api_container: prism-p172956-python-timescaledb
+generator:
+  profile: query-mix
+  written: 0
+  queries: 1432
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 300.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 300.0
+meta:
+  backend: python
+  storage: timescaledb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: python
+  storage: timescaledb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 1.5976324740936882
+  range_p95_seconds: 3.5715368189794354
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 1.5976573923777428
+  storage_range_p95_seconds: 3.5715373900713665
+  api_p95_seconds: 4.0281109949646465
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-generator-run-6810391155de
+    cpu: 5.40%
+    mem: 148.6MiB
+  - name: prism-python-api-1
+    cpu: 98.83%
+    mem: 214.7MiB
+  - name: prism-prometheus-1
+    cpu: 0.55%
+    mem: 145.6MiB
+  - name: prism-p172956-python-vm
+    cpu: 0.11%
+    mem: 162.3MiB
+  - name: prism-p172956-python-influxdb
+    cpu: 100.76%
+    mem: 224.1MiB
+  - name: prism-p172956-python-questdb
+    cpu: 0.09%
+    mem: 38.47MiB
+  - name: prism-p172956-python-clickhouse
+    cpu: 0.10%
+    mem: 223.6MiB
+  - name: prism-p172956-python-timescaledb
+    cpu: 0.14%
+    mem: 133.2MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 1.816MiB
+  - name: prism-csharp-api-1
+    cpu: 0.01%
+    mem: 21MiB
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 19.62MiB
+  - name: prism-influxdb-1
+    cpu: 2.90%
+    mem: 247.5MiB
+  - name: prism-nats-1
+    cpu: 0.05%
+    mem: 16.56MiB
+  - name: prism-timescaledb-1
+    cpu: 0.01%
+    mem: 59.1MiB
+  - name: prism-clickhouse-1
+    cpu: 12.57%
+    mem: 297MiB
+  - name: prism-questdb-1
+    cpu: 8.52%
+    mem: 136.6MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.10%
+    mem: 36.96MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 20.3MiB
+  api:
+    cpu: 0.14%
+    mem: 133.2MiB
+  storage:
+    cpu: 0.01%
+    mem: 59.1MiB
+storage_size:
+  bytes: 1041682475
+  mib: 993.4
+  volume: prism_timescale_data
+  path: /var/lib/postgresql/data

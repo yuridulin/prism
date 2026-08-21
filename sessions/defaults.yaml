@@ -1,8 +1,8 @@
 # Starting characteristics for a new session.
-# Default dispatch: all DBs stay up per backend; only the API storage target changes.
+# Default dispatch: parallel API replicas per backend (one copy per storage), shared DBs.
 
 duration: 5m
-dispatch: by-backend
+dispatch: parallel-by-backend
 
 load:
   profile: iot-steady

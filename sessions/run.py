@@ -1,8 +1,9 @@
-"""Dispatch Prism sessions: by default all DBs stay up while switching storage per backend."""
+"""Dispatch Prism sessions: parallel API replicas per backend by default."""
 
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import subprocess
@@ -18,6 +19,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from session import (  # noqa: E402
+    API_CONTAINER_PORT,
     API_META,
     API_READY,
     API_SERVICE,
@@ -37,10 +39,13 @@ from session import (  # noqa: E402
     pair_dir,
     pair_services,
     pair_slug,
+    parallel_container_name,
+    parallel_host_port,
     parse_generator_output,
     rebuild_catalog,
     save_session,
     session_dir,
+    storage_stack_services,
     storage_volume_name,
     utcnow,
     volume_set_for,
@@ -49,6 +54,7 @@ from session import (  # noqa: E402
 from preflight import run_preflight  # noqa: E402
 
 COMPOSE_FILES = ["-f", "docker-compose.yml", "-f", "docker-compose.session.yml"]
+PROMETHEUS_BASE = ROOT / "infra" / "prometheus" / "prometheus.yml"
 
 STORAGE_DATA_PATH = {
     "timescaledb": "/var/lib/postgresql/data",
@@ -63,16 +69,24 @@ def compose(
     args: list[str],
     env_file: Path | None = None,
     capture: bool = True,
+    extra_files: list[Path] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = ["docker", "compose", *COMPOSE_FILES]
+    for path in extra_files or []:
+        cmd.extend(["-f", str(path)])
     if env_file is not None:
         cmd.extend(["--env-file", str(env_file)])
     cmd.extend(args)
     return subprocess.run(cmd, cwd=ROOT, check=False, text=True, capture_output=capture)
 
 
-def compose_checked(args: list[str], env_file: Path | None = None, capture: bool = True) -> None:
-    proc = compose(args, env_file, capture=capture)
+def compose_checked(
+    args: list[str],
+    env_file: Path | None = None,
+    capture: bool = True,
+    extra_files: list[Path] | None = None,
+) -> None:
+    proc = compose(args, env_file, capture=capture, extra_files=extra_files)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
         raise SessionError(f"docker compose {' '.join(args)} failed: {detail}")
@@ -141,7 +155,7 @@ def should_reset_storage_volume(session: dict) -> bool:
     return volume_set_for(session) != "data"
 
 
-def resolve_skip_seed(session: dict, pair: dict) -> bool:
+def resolve_skip_seed(session: dict, pair: dict, api_base: str | None = None) -> bool:
     what = session.get("what") or {}
     if what.get("skip_seed") or what.get("reuse_volumes"):
         return True
@@ -149,7 +163,8 @@ def resolve_skip_seed(session: dict, pair: dict) -> bool:
     if profile != "query-mix" and volume_set_for(session) != "data":
         return False
     archive_end = str(what.get("archive_end") or LAB_ARCHIVE_END)
-    if archive_seeded(API_URL[pair["backend"]], archive_end):
+    base = api_base or API_URL[pair["backend"]]
+    if archive_seeded(base, archive_end):
         return True
     return False
 
@@ -493,6 +508,265 @@ def run_pair_isolated(session: dict, pair: dict) -> dict:
     return record
 
 
+def remove_container(name: str) -> None:
+    subprocess.run(["docker", "rm", "-f", name], cwd=ROOT, check=False, capture_output=True)
+
+
+def write_parallel_prometheus_config(
+    path: Path,
+    backend: str,
+    replicas: list[tuple[dict, str]],
+) -> None:
+    base = PROMETHEUS_BASE.read_text(encoding="utf-8")
+    blocks = [base.rstrip(), ""]
+    for pair, container in replicas:
+        port = API_CONTAINER_PORT[pair["backend"]]
+        blocks.append(
+            "  - job_name: {job}\n"
+            "    static_configs:\n"
+            '      - targets: ["{target}:{port}"]\n'
+            "        labels:\n"
+            '          backend: "{backend}"\n'
+            '          storage: "{storage}"\n'
+            "          layer: api".format(
+                job=f"parallel-{pair_slug(pair)}",
+                target=container,
+                port=port,
+                backend=pair["backend"],
+                storage=pair["storage"],
+            )
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(blocks) + "\n", encoding="utf-8")
+
+
+def write_prometheus_compose_override(path: Path, prom_config: Path) -> None:
+    rel = prom_config.relative_to(ROOT).as_posix()
+    path.write_text(
+        "services:\n"
+        "  prometheus:\n"
+        "    volumes:\n"
+        f"      - ./{rel}:/etc/prometheus/prometheus.yml:ro\n",
+        encoding="utf-8",
+    )
+
+
+def start_parallel_api(
+    pair: dict,
+    env_file: Path,
+    container: str,
+    host_port: int,
+) -> None:
+    remove_container(container)
+    service = API_SERVICE[pair["backend"]]
+    internal = API_CONTAINER_PORT[pair["backend"]]
+    compose_checked(
+        [
+            "run",
+            "-d",
+            "--name",
+            container,
+            "-p",
+            f"127.0.0.1:{host_port}:{internal}",
+            "--no-deps",
+            service,
+        ],
+        env_file,
+        capture=True,
+    )
+
+
+def collect_meta_url(meta_url: str) -> dict:
+    try:
+        status, body = http_get(meta_url)
+        return json.loads(body) if status == 200 else {"status": status, "body": body}
+    except SessionError as exc:
+        return {"error": str(exc)}
+
+
+def collect_docker_stats_named(api_container: str, storage: str) -> dict:
+    proc = subprocess.run(
+        ["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        return {"error": (proc.stderr or proc.stdout or "").strip()}
+    out = {"raw": []}
+    for line in (proc.stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        name, cpu, mem = parts[0], parts[1], parts[2]
+        row = {"name": name, "cpu": cpu, "mem": mem.split("/")[0].strip()}
+        out["raw"].append(row)
+        if name == api_container:
+            out["api"] = {"cpu": cpu, "mem": row["mem"]}
+        if storage in name.lower() and "exporter" not in name.lower():
+            out["storage"] = {"cpu": cpu, "mem": row["mem"]}
+    return out
+
+
+def run_generator(session: dict, pair: dict, env_file: Path) -> tuple[str, int]:
+    window = session["what"]["duration"]
+    slug = pair_slug(pair)
+    print(f"pair {slug}: load {window}", flush=True)
+    proc = compose(
+        ["--profile", "load", "run", "--rm", "--build", "--no-deps", "generator"],
+        env_file,
+        capture=True,
+    )
+    output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    return output, proc.returncode
+
+
+def finalize_pair_record(
+    session: dict,
+    pair: dict,
+    *,
+    env_file: Path,
+    skip_seed: bool,
+    generator_output: str,
+    generator_rc: int,
+    meta_url: str,
+    api_container: str,
+    dispatch: str,
+) -> dict:
+    slug = pair_slug(pair)
+    work = pair_dir(session["id"], pair)
+    keep = bool((session.get("what") or {}).get("reuse_volumes"))
+    record = {
+        "backend": pair["backend"],
+        "storage": pair["storage"],
+        "status": "running",
+        "when": {"started_at": utcnow(), "finished_at": None},
+        "services": pair_services(pair),
+        "reuse_volumes": keep,
+        "volume_set": volume_set_for(session),
+        "skip_seed": skip_seed,
+        "dispatch": dispatch,
+        "api_container": api_container,
+    }
+    (work / "generator.out").write_text(generator_output, encoding="utf-8")
+    if generator_rc != 0:
+        record["status"] = "failed"
+        record["error"] = f"generator exited {generator_rc}\n{generator_output[-2000:]}"
+    else:
+        record["generator"] = parse_generator_output(generator_output)
+        record["meta"] = collect_meta_url(meta_url)
+        window = session["what"]["duration"]
+        try:
+            record["prometheus"] = collect_prometheus(window, pair["backend"], pair["storage"])
+        except SessionError as exc:
+            record["prometheus_error"] = str(exc)
+        record["resources"] = collect_docker_stats_named(api_container, pair["storage"])
+        record["storage_size"] = collect_storage_size(pair, env_file)
+        size = record["storage_size"]
+        if size.get("bytes") is not None:
+            print(f"pair {slug}: disk {size['mib']} MiB ({size['bytes']} bytes)", flush=True)
+        elif size.get("error"):
+            print(f"pair {slug}: disk measure failed: {size['error']}", file=sys.stderr)
+        record["status"] = "completed"
+    record["when"]["finished_at"] = utcnow()
+    dump_yaml(work / "pair.yaml", record)
+    return record
+
+
+def run_backend_group_parallel(session: dict, backend: str, pairs: list[dict]) -> list[dict]:
+    keep = bool((session.get("what") or {}).get("reuse_volumes"))
+    session_id = session["id"]
+    slugs = ", ".join(pair_slug(p) for p in pairs)
+    print(f"backend {backend}: parallel {len(pairs)} replicas ({slugs})", flush=True)
+
+    base_env = write_compose_env(session, pairs[0])
+    if not keep:
+        wipe_stack(base_env)
+
+    compose_checked(["up", "-d", "--build", *storage_stack_services()], base_env, capture=False)
+
+    replicas: list[tuple[dict, str, int, Path]] = []
+    for pair in pairs:
+        slug = pair_slug(pair)
+        container = parallel_container_name(session_id, pair["backend"], pair["storage"])
+        host_port = parallel_host_port(pair["backend"], pair["storage"])
+        env_file = write_compose_env(session, pair)
+        internal = API_CONTAINER_PORT[pair["backend"]]
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+        lines = [
+            (f"GENERATOR_HTTP_URL=http://{container}:{internal}" if line.startswith("GENERATOR_HTTP_URL=") else line)
+            for line in lines
+        ]
+        env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        start_parallel_api(pair, env_file, container, host_port)
+        wait_ready(f"http://127.0.0.1:{host_port}/readyz")
+        skip_seed = resolve_skip_seed(session, pair, api_base=f"http://127.0.0.1:{host_port}")
+        update_compose_seed_flag(env_file, skip_seed)
+        if skip_seed:
+            print(f"pair {slug}: archive seed skipped", flush=True)
+        replicas.append((pair, container, host_port, env_file))
+
+    prom_config = session_dir(session_id) / f"prometheus-{backend}.yml"
+    prom_override = session_dir(session_id) / f"compose-prometheus-{backend}.yml"
+    write_parallel_prometheus_config(
+        prom_config,
+        backend,
+        [(pair, container) for pair, container, _, _ in replicas],
+    )
+    write_prometheus_compose_override(prom_override, prom_config)
+    compose_checked(
+        ["up", "-d", "--force-recreate", "prometheus"],
+        base_env,
+        capture=False,
+        extra_files=[prom_override],
+    )
+    wait_ready("http://127.0.0.1:9090/-/ready")
+    time.sleep(5)
+
+    outputs: dict[str, tuple[str, int]] = {}
+    with ThreadPoolExecutor(max_workers=len(replicas)) as pool:
+        futures = {
+            pool.submit(run_generator, session, pair, env_file): pair
+            for pair, _, _, env_file in replicas
+        }
+        for future in as_completed(futures):
+            pair = futures[future]
+            slug = pair_slug(pair)
+            try:
+                outputs[slug] = future.result()
+            except Exception as exc:
+                outputs[slug] = (str(exc), 1)
+
+    records: list[dict] = []
+    dispatch = (session.get("what") or {}).get("dispatch") or "parallel-by-backend"
+    for pair, container, host_port, env_file in replicas:
+        slug = pair_slug(pair)
+        skip_seed = resolve_skip_seed(session, pair, api_base=f"http://127.0.0.1:{host_port}")
+        output, rc = outputs.get(slug, ("missing generator output", 1))
+        meta_url = f"http://127.0.0.1:{host_port}/api/meta"
+        record = finalize_pair_record(
+            session,
+            pair,
+            env_file=env_file,
+            skip_seed=skip_seed,
+            generator_output=output,
+            generator_rc=rc,
+            meta_url=meta_url,
+            api_container=container,
+            dispatch=dispatch,
+        )
+        if record.get("status") != "completed":
+            print(f"pair {slug}: failed: {record.get('error', 'unknown')}", file=sys.stderr)
+        records.append(record)
+        remove_container(container)
+
+    if not keep:
+        print(f"backend {backend}: cleanup stack", flush=True)
+        wipe_stack(base_env)
+    return records
+
+
 def run_backend_group(session: dict, backend: str, pairs: list[dict]) -> list[dict]:
     keep = bool((session.get("what") or {}).get("reuse_volumes"))
     print(f"backend {backend}: up all DBs ({len(pairs)} storages)", flush=True)
@@ -524,7 +798,12 @@ def run_pair(session: dict, pair: dict) -> dict:
 
 
 def cmd_new(args: argparse.Namespace) -> int:
-    dispatch = "by-pair" if args.isolated_pairs else (args.dispatch or "by-backend")
+    if args.isolated_pairs:
+        dispatch = "by-pair"
+    elif args.dispatch:
+        dispatch = args.dispatch
+    else:
+        dispatch = "parallel-by-backend"
     session = new_session(
         why=args.why,
         profile=args.profile,
@@ -577,7 +856,7 @@ def _dispatch_pairs(session: dict, args: argparse.Namespace, pairs: list[dict]) 
             raise SessionError(f"unknown pair {args.from_pair!r}")
         start_at = slugs.index(args.from_pair)
     selected = pairs[start_at:stop_at]
-    dispatch = (session.get("what") or {}).get("dispatch") or "by-backend"
+    dispatch = (session.get("what") or {}).get("dispatch") or "parallel-by-backend"
     failed = False
 
     if dispatch == "by-pair":
@@ -595,8 +874,10 @@ def _dispatch_pairs(session: dict, args: argparse.Namespace, pairs: list[dict]) 
                     raise SessionError(f"pair {slug} failed, stopping")
         return 1 if failed else 0
 
+    run_group = run_backend_group_parallel if dispatch == "parallel-by-backend" else run_backend_group
+
     for backend, group in group_pairs_by_backend(selected):
-        records = run_backend_group(session, backend, group)
+        records = run_group(session, backend, group)
         for record in records:
             slug = pair_slug({"backend": record["backend"], "storage": record["storage"]})
             session["results"]["pairs"][slug] = record
@@ -743,8 +1024,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     new.add_argument(
         "--dispatch",
-        choices=("by-backend", "by-pair"),
-        help="by-backend: all DBs up per API; by-pair: isolated wipe per pair",
+        choices=("parallel-by-backend", "by-backend", "by-pair"),
+        help="parallel-by-backend: N API replicas per backend at once; by-backend: switch storage; by-pair: wipe each pair",
     )
     new.add_argument("--skip-preflight", action="store_true", help="do not run contract parity before load")
     new.set_defaults(func=cmd_new)
