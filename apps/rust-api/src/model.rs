@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 pub const CONTRACT: &str = "v1.2";
 pub const QUALITY_GOOD: u16 = 192;
@@ -109,8 +109,16 @@ impl ValuesRequest {
     }
 }
 
+fn serialize_utc<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ValueRecord {
+    #[serde(serialize_with = "serialize_utc")]
     pub date: DateTime<Utc>,
     pub value: f64,
     pub quality: u16,

@@ -182,7 +182,13 @@ fn parse_qdb_csv(text: &str) -> Result<Vec<Sample>> {
     };
     let header = header.trim_end_matches('\r');
     let cols: Vec<&str> = header.split(',').map(|s| s.trim()).collect();
-    let idx = |name: &str| cols.iter().position(|c| c.eq_ignore_ascii_case(name));
+    let idx = |name: &str| {
+        cols.iter().position(|c| {
+            c.trim()
+                .trim_matches('"')
+                .eq_ignore_ascii_case(name)
+        })
+    };
     let (Some(ts_i), Some(tag_i), Some(val_i), Some(q_i)) =
         (idx("ts"), idx("tag_id"), idx("value"), idx("quality"))
     else {
@@ -322,7 +328,21 @@ impl<'de> Visitor<'de> for TsCellVisitor {
         self.visit_i64(v as i64)
     }
     fn visit_f64<E: de::Error>(self, v: f64) -> std::result::Result<TsCell, E> {
-        self.visit_i64(v as i64)
+        if v > 10_000_000_000_000.0 {
+            let micros = v as i64;
+            return DateTime::from_timestamp_micros(micros)
+                .map(TsCell)
+                .ok_or_else(|| E::custom("ts micros"));
+        }
+        if v > 10_000_000_000.0 {
+            let millis = v as i64;
+            return DateTime::from_timestamp_millis(millis)
+                .map(TsCell)
+                .ok_or_else(|| E::custom("ts millis"));
+        }
+        DateTime::from_timestamp(v as i64, 0)
+            .map(TsCell)
+            .ok_or_else(|| E::custom("ts seconds"))
     }
 }
 

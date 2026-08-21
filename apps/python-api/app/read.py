@@ -1,4 +1,14 @@
+from datetime import datetime, timezone
+
 from app.models import Sample, ValuesRequest
+
+
+def _fmt_date(ts: datetime) -> str:
+    if ts.tzinfo is None:
+        stamp = ts.replace(tzinfo=timezone.utc)
+    else:
+        stamp = ts.astimezone(timezone.utc)
+    return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def assemble(req: ValuesRequest, raw: list[Sample]) -> dict:
@@ -10,7 +20,7 @@ def assemble(req: ValuesRequest, raw: list[Sample]) -> dict:
         index[tag_id] = len(tags)
         tags.append({"id": tag_id, "values": []})
     for sample in raw:
-        rec = {"date": sample.ts, "value": sample.value, "quality": sample.quality}
+        rec = {"date": _fmt_date(sample.ts), "value": sample.value, "quality": sample.quality}
         if sample.tag_id not in index:
             index[sample.tag_id] = len(tags)
             tags.append({"id": sample.tag_id, "values": [rec]})

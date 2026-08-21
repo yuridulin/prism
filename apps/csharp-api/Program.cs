@@ -174,6 +174,7 @@ static void ConfigureJson(JsonSerializerOptions o)
     o.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     o.PropertyNameCaseInsensitive = true;
     o.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    o.Converters.Add(new UtcRfc3339Converter());
 }
 
 static async Task<IResult> ServeRead(IStore store, ValuesRequest? req, CancellationToken ct)

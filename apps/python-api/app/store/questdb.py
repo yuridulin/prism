@@ -5,7 +5,40 @@ import socket
 from datetime import datetime, timezone
 
 from app.models import Sample, Tag
-from app.store.net import ilp_float, new_client, parse_hostport, raise_status, unix_ns
+from app.store.net import _utc, ilp_float, new_client, parse_hostport, raise_status, unix_ns
+
+
+def _parse_qdb_ts(raw) -> datetime | None:
+    if isinstance(raw, datetime):
+        return _utc(raw)
+    if isinstance(raw, str):
+        text = raw.strip().strip('"')
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+        try:
+            value = int(float(text))
+        except ValueError:
+            return None
+    elif isinstance(raw, (int, float)):
+        value = int(raw)
+    else:
+        return None
+    if value > 10_000_000_000_000:
+        return datetime.fromtimestamp(value / 1_000_000, tz=timezone.utc)
+    if value > 10_000_000_000:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(value, tz=timezone.utc)
+
+
+def _parse_qdb_tag(raw) -> int:
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    text = str(raw).strip().strip('"')
+    return int(float(text or 0))
 
 
 def _qdb_time(ts: datetime) -> str:
@@ -23,18 +56,21 @@ def _parse_qdb_csv(text: str) -> list[Sample]:
         header = next(reader)
     except StopIteration:
         return []
-    idx = {name.strip().lower(): i for i, name in enumerate(header)}
+    idx = {name.strip().strip('"').lower(): i for i, name in enumerate(header)}
     ts_i, tag_i, val_i, q_i = idx["ts"], idx["tag_id"], idx["value"], idx["quality"]
     c_i = idx.get("carried")
     out: list[Sample] = []
     for row in reader:
         if max(ts_i, tag_i, val_i, q_i) >= len(row):
             continue
-        ts = row[ts_i]
+        ts_raw = row[ts_i]
+        ts = _parse_qdb_ts(ts_raw)
+        if ts is None:
+            continue
         try:
-            stamp = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            tag_id = _parse_qdb_tag(row[tag_i])
             sample = Sample(
-                ts=stamp, tag_id=int(row[tag_i]), value=float(row[val_i]), quality=int(float(row[q_i]))
+                ts=ts, tag_id=tag_id, value=float(row[val_i]), quality=int(float(row[q_i]))
             )
         except (TypeError, ValueError):
             continue
@@ -184,14 +220,12 @@ class QuestDBStore:
             if len(row) < 4:
                 continue
             ts = row[0]
-            try:
-                if isinstance(ts, str):
-                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                elif not isinstance(ts, datetime):
-                    continue
-                sample = Sample(ts=ts, tag_id=int(row[1]), value=float(row[2]), quality=int(row[3]))
-            except (TypeError, ValueError):
+            stamp = _parse_qdb_ts(ts)
+            if stamp is None:
                 continue
+            sample = Sample(
+                ts=stamp, tag_id=_parse_qdb_tag(row[1]), value=float(row[2]), quality=int(row[3])
+            )
             if has_carried and len(row) > 4:
                 sample.carried = bool(row[4])
             out.append(sample)

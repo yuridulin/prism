@@ -108,6 +108,7 @@ public sealed class ValuesRequest
 
 public sealed class ValueRecord
 {
+    [JsonConverter(typeof(UtcRfc3339Converter))]
     public DateTimeOffset Date { get; set; }
     public double Value { get; set; }
     public ushort Quality { get; set; }

@@ -175,7 +175,7 @@ public sealed class QuestDbStore : IStore
         var idx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < cols.Length; i++)
         {
-            idx[cols[i].Trim()] = i;
+            idx[cols[i].Trim().Trim('"')] = i;
         }
 
         if (!idx.TryGetValue("ts", out var tsI) || !idx.TryGetValue("tag_id", out var tagI)

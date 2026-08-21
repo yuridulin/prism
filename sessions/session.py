@@ -42,6 +42,12 @@ API_URL = {
     "csharp": "http://csharp-api:8083",
     "rust": "http://rust-api:8084",
 }
+API_HOST = {
+    "go": "http://127.0.0.1:8081",
+    "python": "http://127.0.0.1:8082",
+    "csharp": "http://127.0.0.1:8083",
+    "rust": "http://127.0.0.1:8084",
+}
 API_READY = {
     "go": "http://127.0.0.1:8081/readyz",
     "python": "http://127.0.0.1:8082/readyz",
