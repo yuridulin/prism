@@ -110,53 +110,7 @@ func (s *QuestDB) Write(ctx context.Context, samples []model.Sample) error {
 	if err := s.sendILP(ctx, buf.Bytes()); err != nil {
 		return err
 	}
-	return s.waitSamples(ctx, samples)
-}
-
-func (s *QuestDB) waitSamples(ctx context.Context, samples []model.Sample) error {
-	if len(samples) == 0 {
-		return nil
-	}
-	tagSet := make(map[uint32]struct{}, len(samples))
-	for i := range samples {
-		tagSet[samples[i].TagID] = struct{}{}
-	}
-	tagIDs := make([]uint32, 0, len(tagSet))
-	for id := range tagSet {
-		tagIDs = append(tagIDs, id)
-	}
-	want := len(samples)
-	q := fmt.Sprintf("SELECT count() FROM samples WHERE tag_id IN (%s)", joinSymbolIDs(tagIDs))
-	deadline := time.Now().Add(15 * time.Second)
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(100 * time.Millisecond):
-	}
-	for {
-		data, err := s.exec(ctx, q)
-		if err != nil {
-			return err
-		}
-		if qdbCount(data) >= want {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("questdb: wrote %d samples but only %d visible", want, qdbCount(data))
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(25 * time.Millisecond):
-		}
-	}
-}
-
-func qdbCount(data *qdbExec) int {
-	if len(data.Dataset) == 0 || len(data.Dataset[0]) == 0 {
-		return 0
-	}
-	return int(asFloat(data.Dataset[0][0]))
+	return nil
 }
 
 func (s *QuestDB) sendILP(ctx context.Context, payload []byte) error {

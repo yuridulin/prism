@@ -168,6 +168,23 @@ def cleanup_probe_samples(storage: str, fixture: dict | None = None) -> None:
     raise SessionError(f"unsupported probe cleanup storage {storage!r}")
 
 
+def settle_probe_write(storage: str, base: str, fixture: dict) -> None:
+    """QuestDB ILP and VM /write are async; preflight reads must not race the baseline PUT."""
+    if storage not in {"questdb", "victoriametrics"}:
+        return
+    range_payload = dict(fixture["range"])
+    want = 2  # carried @ old + one point in (old, young] for tag 900001
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        status, body = http_json("POST", f"{base}/api/values", range_payload)
+        if status == 200:
+            tags = body.get("tags") or []
+            if tags and len((tags[0].get("values") or [])) >= want:
+                return
+        time.sleep(0.05)
+    raise SessionError(f"preflight: probe write not visible on {storage} within 15s")
+
+
 def check_meta(meta: dict, fixture: dict, backend: str, storage: str) -> list[str]:
     issues: list[str] = []
     if meta.get("backend") != backend:
@@ -215,6 +232,7 @@ def probe_pair(
         status, write_resp = http_json("PUT", f"{base}/api/values", fixture["write"])
         if status != 200:
             return None, [f"{slug}: write HTTP {status} {write_resp}"]
+        settle_probe_write(storage, base, fixture)
 
     locf_payload = dict(fixture["locf"])
     status, locf_body = http_json("POST", f"{base}/api/values", locf_payload)

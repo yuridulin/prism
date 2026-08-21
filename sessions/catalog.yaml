@@ -161,7 +161,7 @@ sessions:
   - rust-victoriametrics
   path: sessions/20260821T113416-query-mix/session.yaml
 - id: 20260821T170551-query-mix
-  status: running
+  status: failed
   created_at: '2026-08-21T17:05:51Z'
   why: query-mix by-backend read after contract parity fix
   profile: query-mix
@@ -216,3 +216,88 @@ sessions:
   - rust-influxdb
   - rust-victoriametrics
   path: sessions/20260821T172956-query-mix/session.yaml
+- id: 20260821T181504-query-mix
+  status: planned
+  created_at: '2026-08-21T18:15:04Z'
+  why: 3x3 sequential pairs, 3m read each on existing archive
+  profile: query-mix
+  duration: 3m
+  pairs:
+  - go-timescaledb
+  - go-questdb
+  - go-victoriametrics
+  - csharp-timescaledb
+  - csharp-questdb
+  - csharp-victoriametrics
+  - rust-timescaledb
+  - rust-questdb
+  - rust-victoriametrics
+  path: sessions/20260821T181504-query-mix/session.yaml
+- id: 20260821T181529-query-mix
+  status: planned
+  created_at: '2026-08-21T18:15:29Z'
+  why: test
+  profile: query-mix
+  duration: 3m
+  pairs:
+  - go-timescaledb
+  - go-questdb
+  - go-victoriametrics
+  - csharp-timescaledb
+  - csharp-questdb
+  - csharp-victoriametrics
+  - rust-timescaledb
+  - rust-questdb
+  - rust-victoriametrics
+  path: sessions/20260821T181529-query-mix/session.yaml
+- id: 20260821T181540-query-mix
+  status: planned
+  created_at: '2026-08-21T18:15:40Z'
+  why: test
+  profile: query-mix
+  duration: 3m
+  pairs:
+  - go-timescaledb
+  - go-questdb
+  - go-victoriametrics
+  - csharp-timescaledb
+  - csharp-questdb
+  - csharp-victoriametrics
+  - rust-timescaledb
+  - rust-questdb
+  - rust-victoriametrics
+  path: sessions/20260821T181540-query-mix/session.yaml
+- id: 20260821T181555-query-mix
+  status: completed
+  created_at: '2026-08-21T18:15:55Z'
+  why: 3x3 sequential pairs, 3m read each on existing archive
+  profile: query-mix
+  duration: 3m
+  pairs:
+  - go-timescaledb
+  - go-questdb
+  - go-victoriametrics
+  - csharp-timescaledb
+  - csharp-questdb
+  - csharp-victoriametrics
+  - rust-timescaledb
+  - rust-questdb
+  - rust-victoriametrics
+  path: sessions/20260821T181555-query-mix/session.yaml
+- id: 20260821T193755-query-mix
+  status: completed
+  created_at: '2026-08-21T19:37:55Z'
+  why: 3x3 sequential 3m on fresh reseeded archive
+  profile: query-mix
+  duration: 3m
+  pairs:
+  - go-timescaledb
+  - go-questdb
+  - go-victoriametrics
+  - csharp-timescaledb
+  - csharp-questdb
+  - csharp-victoriametrics
+  - rust-timescaledb
+  - rust-questdb
+  - rust-victoriametrics
+  path: sessions/20260821T193755-query-mix/session.yaml

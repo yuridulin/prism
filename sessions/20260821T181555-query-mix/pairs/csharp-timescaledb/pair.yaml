@@ -1,0 +1,106 @@
+backend: csharp
+storage: timescaledb
+status: completed
+when:
+  started_at: '2026-08-21T18:26:13Z'
+  finished_at: '2026-08-21T18:29:25Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- questdb
+- victoriametrics
+- postgres-exporter
+- csharp-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: by-pair
+generator:
+  profile: query-mix
+  written: 0
+  queries: 2348
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: csharp
+  storage: timescaledb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: csharp
+  storage: timescaledb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.004956229419894827
+  range_p95_seconds: 0.23631422307853667
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.004951647129031754
+  storage_range_p95_seconds: 0.2363140659755038
+  api_p95_seconds: 0.6683268425271073
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 0.02%
+    mem: 129.8MiB
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 52.01MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 2.582MiB
+  - name: prism-prometheus-1
+    cpu: 0.07%
+    mem: 111MiB
+  - name: prism-python-api-1
+    cpu: 0.39%
+    mem: 182MiB
+  - name: prism-influxdb-1
+    cpu: 0.06%
+    mem: 254.5MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 8.246MiB
+  - name: prism-timescaledb-1
+    cpu: 2.17%
+    mem: 72.79MiB
+  - name: prism-clickhouse-1
+    cpu: 2.53%
+    mem: 713.4MiB
+  - name: prism-questdb-1
+    cpu: 0.97%
+    mem: 183.1MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.15%
+    mem: 44.21MiB
+  - name: prism-postgres-exporter-1
+    cpu: 2.48%
+    mem: 25.03MiB
+  api:
+    cpu: 0.02%
+    mem: 129.8MiB
+  storage:
+    cpu: 2.17%
+    mem: 72.79MiB
+storage_size:
+  bytes: 1041690667
+  mib: 993.4
+  volume: prism_timescale_data
+  path: /var/lib/postgresql/data

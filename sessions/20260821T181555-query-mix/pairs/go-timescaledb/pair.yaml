@@ -1,0 +1,106 @@
+backend: go
+storage: timescaledb
+status: completed
+when:
+  started_at: '2026-08-21T18:16:36Z'
+  finished_at: '2026-08-21T18:19:48Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- questdb
+- victoriametrics
+- postgres-exporter
+- go-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: by-pair
+generator:
+  profile: query-mix
+  written: 0
+  queries: 2536
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: go
+  storage: timescaledb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: go
+  storage: timescaledb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.004798789485366204
+  range_p95_seconds: 0.3730113636363636
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.004798148592312002
+  storage_range_p95_seconds: 0.3730113636363636
+  api_p95_seconds: 0.5578124999999994
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 43.25MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 5.289MiB
+  - name: prism-csharp-api-1
+    cpu: 0.01%
+    mem: 46.36MiB
+  - name: prism-prometheus-1
+    cpu: 0.14%
+    mem: 190.2MiB
+  - name: prism-python-api-1
+    cpu: 0.13%
+    mem: 180.2MiB
+  - name: prism-influxdb-1
+    cpu: 0.04%
+    mem: 248MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 20.08MiB
+  - name: prism-timescaledb-1
+    cpu: 2.46%
+    mem: 85.03MiB
+  - name: prism-clickhouse-1
+    cpu: 3.32%
+    mem: 720.5MiB
+  - name: prism-questdb-1
+    cpu: 1.10%
+    mem: 195.7MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.16%
+    mem: 30.25MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 21.29MiB
+  api:
+    cpu: 0.00%
+    mem: 43.25MiB
+  storage:
+    cpu: 2.46%
+    mem: 85.03MiB
+storage_size:
+  bytes: 1041690667
+  mib: 993.4
+  volume: prism_timescale_data
+  path: /var/lib/postgresql/data

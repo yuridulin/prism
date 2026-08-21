@@ -286,6 +286,15 @@ def list_session_ids() -> list[str]:
     return sorted(path.parent.name for path in SESSIONS_DIR.glob("*/session.yaml"))
 
 
+def catalog_pair_slug(raw: dict | str) -> str:
+    """Slug for catalog entries; old sessions may list dropped backend/storage pairs."""
+    if isinstance(raw, str):
+        return raw.replace(":", "-") if ":" in raw else raw
+    backend = str(raw.get("backend") or "").strip().lower()
+    storage = str(raw.get("storage") or "").strip().lower()
+    return f"{backend}-{storage}"
+
+
 def rebuild_catalog() -> dict:
     items = []
     for session_id in list_session_ids():
@@ -300,7 +309,7 @@ def rebuild_catalog() -> dict:
                 "why": session.get("why"),
                 "profile": (what.get("load") or {}).get("profile"),
                 "duration": what.get("duration"),
-                "pairs": [pair_slug(normalize_pair(p)) for p in pairs],
+                "pairs": [catalog_pair_slug(p) for p in pairs],
                 "path": str(session_path(session_id).relative_to(ROOT)).replace("\\", "/"),
             }
         )

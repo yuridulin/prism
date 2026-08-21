@@ -1,0 +1,97 @@
+backend: csharp
+storage: timescaledb
+status: completed
+when:
+  started_at: '2026-08-21T19:50:37Z'
+  finished_at: '2026-08-21T19:53:49Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- questdb
+- victoriametrics
+- postgres-exporter
+- csharp-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: by-pair
+generator:
+  profile: query-mix
+  written: 0
+  queries: 2457
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: csharp
+  storage: timescaledb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: csharp
+  storage: timescaledb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.004900140528218486
+  range_p95_seconds: 0.20027656410093114
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.004900139374022588
+  storage_range_p95_seconds: 0.2002762711619141
+  api_p95_seconds: 0.42541206710201496
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 0.02%
+    mem: 102.3MiB
+  - name: prism-go-api-1
+    cpu: 1.81%
+    mem: 20.82MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 2.039MiB
+  - name: prism-postgres-exporter-1
+    cpu: 2.77%
+    mem: 26.89MiB
+  - name: prism-timescaledb-1
+    cpu: 8.25%
+    mem: 326.7MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.13%
+    mem: 153.2MiB
+  - name: prism-prometheus-1
+    cpu: 0.46%
+    mem: 73.12MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 8.586MiB
+  - name: prism-questdb-1
+    cpu: 1.21%
+    mem: 453.7MiB
+  api:
+    cpu: 0.02%
+    mem: 102.3MiB
+  storage:
+    cpu: 8.25%
+    mem: 326.7MiB
+storage_size:
+  bytes: 381124592
+  mib: 363.5
+  volume: prism_timescale_data
+  path: /var/lib/postgresql/data

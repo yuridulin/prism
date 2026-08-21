@@ -1,0 +1,1296 @@
+id: 20260821T181555-query-mix
+status: completed
+when:
+  created_at: '2026-08-21T18:15:55Z'
+  started_at: '2026-08-21T18:15:55Z'
+  finished_at: '2026-08-21T18:45:37Z'
+why: 3x3 sequential pairs, 3m read each on existing archive
+what:
+  duration: 3m
+  duration_seconds: 180
+  load:
+    profile: query-mix
+    transport: ''
+  pairs:
+  - backend: go
+    storage: timescaledb
+  - backend: go
+    storage: questdb
+  - backend: go
+    storage: victoriametrics
+  - backend: csharp
+    storage: timescaledb
+  - backend: csharp
+    storage: questdb
+  - backend: csharp
+    storage: victoriametrics
+  - backend: rust
+    storage: timescaledb
+  - backend: rust
+    storage: questdb
+  - backend: rust
+    storage: victoriametrics
+  resources: &id001
+    api:
+      cpus: '1.0'
+      memory: 512M
+    storage:
+      cpus: '1.0'
+      memory: 1G
+    bus:
+      cpus: '0.50'
+      memory: 256M
+    observe:
+      cpus: '0.50'
+      memory: 512M
+    generator:
+      cpus: '1.0'
+      memory: 512M
+  reuse_volumes: true
+  skip_seed: true
+  archive_end: '2026-08-20T16:49:20Z'
+  dispatch: by-pair
+  volume_set: data
+  skip_preflight: false
+results:
+  pairs:
+    go-timescaledb:
+      backend: go
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-21T18:16:36Z'
+        finished_at: '2026-08-21T18:19:48Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - go-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2536
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: go
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: go
+        storage: timescaledb
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.004798789485366204
+        range_p95_seconds: 0.3730113636363636
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.004798148592312002
+        storage_range_p95_seconds: 0.3730113636363636
+        api_p95_seconds: 0.5578124999999994
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 43.25MiB
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 5.289MiB
+        - name: prism-csharp-api-1
+          cpu: 0.01%
+          mem: 46.36MiB
+        - name: prism-prometheus-1
+          cpu: 0.14%
+          mem: 190.2MiB
+        - name: prism-python-api-1
+          cpu: 0.13%
+          mem: 180.2MiB
+        - name: prism-influxdb-1
+          cpu: 0.04%
+          mem: 248MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 20.08MiB
+        - name: prism-timescaledb-1
+          cpu: 2.46%
+          mem: 85.03MiB
+        - name: prism-clickhouse-1
+          cpu: 3.32%
+          mem: 720.5MiB
+        - name: prism-questdb-1
+          cpu: 1.10%
+          mem: 195.7MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.16%
+          mem: 30.25MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 21.29MiB
+        api:
+          cpu: 0.00%
+          mem: 43.25MiB
+        storage:
+          cpu: 2.46%
+          mem: 85.03MiB
+      storage_size:
+        bytes: 1041690667
+        mib: 993.4
+        volume: prism_timescale_data
+        path: /var/lib/postgresql/data
+    go-questdb:
+      backend: go
+      storage: questdb
+      status: completed
+      when:
+        started_at: '2026-08-21T18:19:49Z'
+        finished_at: '2026-08-21T18:23:00Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - go-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2856
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: go
+        storage: questdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: go
+        storage: questdb
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.0047640349276414804
+        range_p95_seconds: 0.0047533170391061445
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.00476403495260801
+        storage_range_p95_seconds: 0.0047533170391061445
+        api_p95_seconds: 0.00476028880866426
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 13.33MiB
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 5.328MiB
+        - name: prism-csharp-api-1
+          cpu: 0.01%
+          mem: 53.66MiB
+        - name: prism-prometheus-1
+          cpu: 0.62%
+          mem: 191.8MiB
+        - name: prism-python-api-1
+          cpu: 0.13%
+          mem: 180.2MiB
+        - name: prism-influxdb-1
+          cpu: 0.03%
+          mem: 251.5MiB
+        - name: prism-nats-1
+          cpu: 0.05%
+          mem: 20.33MiB
+        - name: prism-timescaledb-1
+          cpu: 10.33%
+          mem: 38.68MiB
+        - name: prism-clickhouse-1
+          cpu: 3.65%
+          mem: 737.1MiB
+        - name: prism-questdb-1
+          cpu: 5.25%
+          mem: 200.7MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.21%
+          mem: 29.02MiB
+        - name: prism-postgres-exporter-1
+          cpu: 4.22%
+          mem: 22.79MiB
+        api:
+          cpu: 0.00%
+          mem: 13.33MiB
+        storage:
+          cpu: 5.25%
+          mem: 200.7MiB
+      storage_size:
+        bytes: 129591367
+        mib: 123.6
+        volume: prism_questdb_data
+        path: /var/lib/questdb
+    go-victoriametrics:
+      backend: go
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-21T18:23:01Z'
+        finished_at: '2026-08-21T18:26:12Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - go-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2658
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: go
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: go
+        storage: victoriametrics
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.008487436854293932
+        range_p95_seconds: 0.19650390624999986
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.008487301570978552
+        storage_range_p95_seconds: 0.19650390624999986
+        api_p95_seconds: 0.29902343750000027
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 99.67MiB
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 5.535MiB
+        - name: prism-csharp-api-1
+          cpu: 2.24%
+          mem: 59.57MiB
+        - name: prism-prometheus-1
+          cpu: 0.68%
+          mem: 88.33MiB
+        - name: prism-python-api-1
+          cpu: 0.14%
+          mem: 180.2MiB
+        - name: prism-influxdb-1
+          cpu: 0.55%
+          mem: 245.7MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 20.07MiB
+        - name: prism-timescaledb-1
+          cpu: 2.70%
+          mem: 39.39MiB
+        - name: prism-clickhouse-1
+          cpu: 10.29%
+          mem: 749.9MiB
+        - name: prism-questdb-1
+          cpu: 1.16%
+          mem: 198.1MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.16%
+          mem: 56.6MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 21.08MiB
+        api:
+          cpu: 0.00%
+          mem: 99.67MiB
+        storage:
+          cpu: 0.16%
+          mem: 56.6MiB
+      storage_size:
+        bytes: 15492500
+        mib: 14.8
+        volume: prism_vm_data
+        path: /victoria-metrics-data
+    csharp-timescaledb:
+      backend: csharp
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-21T18:26:13Z'
+        finished_at: '2026-08-21T18:29:25Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - csharp-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2348
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: csharp
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: timescaledb
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.004956229419894827
+        range_p95_seconds: 0.23631422307853667
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.004951647129031754
+        storage_range_p95_seconds: 0.2363140659755038
+        api_p95_seconds: 0.6683268425271073
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 0.02%
+          mem: 129.8MiB
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 52.01MiB
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 2.582MiB
+        - name: prism-prometheus-1
+          cpu: 0.07%
+          mem: 111MiB
+        - name: prism-python-api-1
+          cpu: 0.39%
+          mem: 182MiB
+        - name: prism-influxdb-1
+          cpu: 0.06%
+          mem: 254.5MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 8.246MiB
+        - name: prism-timescaledb-1
+          cpu: 2.17%
+          mem: 72.79MiB
+        - name: prism-clickhouse-1
+          cpu: 2.53%
+          mem: 713.4MiB
+        - name: prism-questdb-1
+          cpu: 0.97%
+          mem: 183.1MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.15%
+          mem: 44.21MiB
+        - name: prism-postgres-exporter-1
+          cpu: 2.48%
+          mem: 25.03MiB
+        api:
+          cpu: 0.02%
+          mem: 129.8MiB
+        storage:
+          cpu: 2.17%
+          mem: 72.79MiB
+      storage_size:
+        bytes: 1041690667
+        mib: 993.4
+        volume: prism_timescale_data
+        path: /var/lib/postgresql/data
+    csharp-questdb:
+      backend: csharp
+      storage: questdb
+      status: completed
+      when:
+        started_at: '2026-08-21T18:29:26Z'
+        finished_at: '2026-08-21T18:32:39Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - csharp-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2848
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: csharp
+        storage: questdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: questdb
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.004762202296175676
+        range_p95_seconds: 0.0047625179962436735
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.004761380789875331
+        storage_range_p95_seconds: 0.004761723949934575
+        api_p95_seconds: 0.0047683233044088814
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 6.12%
+          mem: 66.79MiB
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 23.9MiB
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 3.789MiB
+        - name: prism-prometheus-1
+          cpu: 0.67%
+          mem: 97.8MiB
+        - name: prism-python-api-1
+          cpu: 0.13%
+          mem: 178.8MiB
+        - name: prism-influxdb-1
+          cpu: 0.03%
+          mem: 246.5MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 8.492MiB
+        - name: prism-timescaledb-1
+          cpu: 8.66%
+          mem: 47.86MiB
+        - name: prism-clickhouse-1
+          cpu: 33.46%
+          mem: 782.8MiB
+        - name: prism-questdb-1
+          cpu: 4.31%
+          mem: 191.1MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.38%
+          mem: 48.52MiB
+        - name: prism-postgres-exporter-1
+          cpu: 2.86%
+          mem: 23.62MiB
+        api:
+          cpu: 6.12%
+          mem: 66.79MiB
+        storage:
+          cpu: 4.31%
+          mem: 191.1MiB
+      storage_size:
+        bytes: 45983364
+        mib: 43.9
+        volume: prism_questdb_data
+        path: /var/lib/questdb
+    csharp-victoriametrics:
+      backend: csharp
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-21T18:32:40Z'
+        finished_at: '2026-08-21T18:35:53Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - csharp-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2347
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: csharp
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: victoriametrics
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.023934212056790853
+        range_p95_seconds: 0.3475017033435467
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.023917729109515243
+        storage_range_p95_seconds: 0.34687059428629063
+        api_p95_seconds: 0.6803426977552144
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 0.01%
+          mem: 113.1MiB
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 24.36MiB
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 2.598MiB
+        - name: prism-prometheus-1
+          cpu: 0.77%
+          mem: 88.67MiB
+        - name: prism-python-api-1
+          cpu: 0.13%
+          mem: 176.7MiB
+        - name: prism-influxdb-1
+          cpu: 0.53%
+          mem: 174.3MiB
+        - name: prism-nats-1
+          cpu: 0.03%
+          mem: 8.742MiB
+        - name: prism-timescaledb-1
+          cpu: 0.01%
+          mem: 50.52MiB
+        - name: prism-clickhouse-1
+          cpu: 3.14%
+          mem: 763.4MiB
+        - name: prism-questdb-1
+          cpu: 1.12%
+          mem: 172.3MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.06%
+          mem: 57.4MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 21.97MiB
+        api:
+          cpu: 0.01%
+          mem: 113.1MiB
+        storage:
+          cpu: 0.06%
+          mem: 57.4MiB
+      storage_size:
+        bytes: 15492500
+        mib: 14.8
+        volume: prism_vm_data
+        path: /victoria-metrics-data
+    rust-timescaledb:
+      backend: rust
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-21T18:35:54Z'
+        finished_at: '2026-08-21T18:39:09Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - rust-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2387
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: rust
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: rust
+        storage: timescaledb
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.00887739049497716
+        range_p95_seconds: 0.2400748502994012
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.008877380496903247
+        storage_range_p95_seconds: 0.2400748502994012
+        api_p95_seconds: 0.31742700729927054
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 1.93%
+          mem: 16.04MiB
+        - name: prism-csharp-api-1
+          cpu: 0.01%
+          mem: 113.3MiB
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 26.06MiB
+        - name: prism-prometheus-1
+          cpu: 0.66%
+          mem: 90.57MiB
+        - name: prism-python-api-1
+          cpu: 0.14%
+          mem: 176.7MiB
+        - name: prism-influxdb-1
+          cpu: 0.04%
+          mem: 172.2MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 8.496MiB
+        - name: prism-timescaledb-1
+          cpu: 0.00%
+          mem: 125.5MiB
+        - name: prism-clickhouse-1
+          cpu: 2.44%
+          mem: 752.7MiB
+        - name: prism-questdb-1
+          cpu: 1.03%
+          mem: 172.3MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.31%
+          mem: 55.24MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 23.85MiB
+        api:
+          cpu: 1.93%
+          mem: 16.04MiB
+        storage:
+          cpu: 0.00%
+          mem: 125.5MiB
+      storage_size:
+        bytes: 1041690667
+        mib: 993.4
+        volume: prism_timescale_data
+        path: /var/lib/postgresql/data
+    rust-questdb:
+      backend: rust
+      storage: questdb
+      status: completed
+      when:
+        started_at: '2026-08-21T18:39:10Z'
+        finished_at: '2026-08-21T18:42:22Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - rust-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2856
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: rust
+        storage: questdb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: rust
+        storage: questdb
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.004757126781695424
+        range_p95_seconds: 0.004766631652661064
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.004757126781695424
+        storage_range_p95_seconds: 0.004766631652661064
+        api_p95_seconds: 0.004762042738138356
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 4.695MiB
+        - name: prism-csharp-api-1
+          cpu: 0.01%
+          mem: 113.8MiB
+        - name: prism-go-api-1
+          cpu: 0.27%
+          mem: 24.14MiB
+        - name: prism-prometheus-1
+          cpu: 0.59%
+          mem: 93.47MiB
+        - name: prism-python-api-1
+          cpu: 0.15%
+          mem: 177.2MiB
+        - name: prism-influxdb-1
+          cpu: 2.73%
+          mem: 178.3MiB
+        - name: prism-nats-1
+          cpu: 0.09%
+          mem: 8.742MiB
+        - name: prism-timescaledb-1
+          cpu: 0.01%
+          mem: 60.7MiB
+        - name: prism-clickhouse-1
+          cpu: 4.92%
+          mem: 776.4MiB
+        - name: prism-questdb-1
+          cpu: 4.92%
+          mem: 172.6MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.15%
+          mem: 54.24MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 25.35MiB
+        api:
+          cpu: 0.00%
+          mem: 4.695MiB
+        storage:
+          cpu: 4.92%
+          mem: 172.6MiB
+      storage_size:
+        bytes: 45983364
+        mib: 43.9
+        volume: prism_questdb_data
+        path: /var/lib/questdb
+    rust-victoriametrics:
+      backend: rust
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-21T18:42:23Z'
+        finished_at: '2026-08-21T18:45:36Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - questdb
+      - victoriametrics
+      - postgres-exporter
+      - rust-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2581
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: rust
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: rust
+        storage: victoriametrics
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.03970833333333326
+        range_p95_seconds: 0.20589999999999983
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.03970833333333326
+        storage_range_p95_seconds: 0.20589999999999983
+        api_p95_seconds: 0.24495901639344267
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 45.89MiB
+        - name: prism-csharp-api-1
+          cpu: 0.01%
+          mem: 122MiB
+        - name: prism-go-api-1
+          cpu: 0.15%
+          mem: 25.95MiB
+        - name: prism-prometheus-1
+          cpu: 0.15%
+          mem: 93.01MiB
+        - name: prism-python-api-1
+          cpu: 0.31%
+          mem: 176.9MiB
+        - name: prism-influxdb-1
+          cpu: 0.03%
+          mem: 175.7MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 8.5MiB
+        - name: prism-timescaledb-1
+          cpu: 0.00%
+          mem: 62.32MiB
+        - name: prism-clickhouse-1
+          cpu: 4.34%
+          mem: 755.9MiB
+        - name: prism-questdb-1
+          cpu: 0.88%
+          mem: 173.1MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.19%
+          mem: 55.56MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 27.27MiB
+        api:
+          cpu: 0.00%
+          mem: 45.89MiB
+        storage:
+          cpu: 0.19%
+          mem: 55.56MiB
+      storage_size:
+        bytes: 15492500
+        mib: 14.8
+        volume: prism_vm_data
+        path: /victoria-metrics-data
+  comparison:
+    profile: query-mix
+    duration: 3m
+    envelope: *id001
+    how: Одинаковый resource envelope. Каждая пара — отдельный чистый старт. Сначала
+      тот же архив (год, частые и редкие теги), затем только locf/range. Эффективнее
+      та, что отвечает быстрее на locf и range без ошибок и занимает меньше места
+      тем же архивом. storage_*_p95 показывает, где сидит задержка — в БД или в API.
+      Seed в scorecard не входит.
+    primary: read
+    rows:
+    - pair: go-timescaledb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2536
+      write_p95_ms: null
+      locf_p95_ms: 4.799
+      range_p95_ms: 373.011
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 4.798
+      storage_range_p95_ms: 373.011
+      api_p95_ms: 557.812
+      cpu_api: 0.00%
+      mem_api: 43.25MiB
+      cpu_storage: 2.46%
+      mem_storage: 85.03MiB
+      storage_bytes: 1041690667
+      storage_mib: 993.4
+    - pair: go-questdb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2856
+      write_p95_ms: null
+      locf_p95_ms: 4.764
+      range_p95_ms: 4.753
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 4.764
+      storage_range_p95_ms: 4.753
+      api_p95_ms: 4.76
+      cpu_api: 0.00%
+      mem_api: 13.33MiB
+      cpu_storage: 5.25%
+      mem_storage: 200.7MiB
+      storage_bytes: 129591367
+      storage_mib: 123.6
+    - pair: go-victoriametrics
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2658
+      write_p95_ms: null
+      locf_p95_ms: 8.487
+      range_p95_ms: 196.504
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 8.487
+      storage_range_p95_ms: 196.504
+      api_p95_ms: 299.023
+      cpu_api: 0.00%
+      mem_api: 99.67MiB
+      cpu_storage: 0.16%
+      mem_storage: 56.6MiB
+      storage_bytes: 15492500
+      storage_mib: 14.8
+    - pair: csharp-timescaledb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2348
+      write_p95_ms: null
+      locf_p95_ms: 4.956
+      range_p95_ms: 236.314
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 4.952
+      storage_range_p95_ms: 236.314
+      api_p95_ms: 668.327
+      cpu_api: 0.02%
+      mem_api: 129.8MiB
+      cpu_storage: 2.17%
+      mem_storage: 72.79MiB
+      storage_bytes: 1041690667
+      storage_mib: 993.4
+    - pair: csharp-questdb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2848
+      write_p95_ms: null
+      locf_p95_ms: 4.762
+      range_p95_ms: 4.763
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 4.761
+      storage_range_p95_ms: 4.762
+      api_p95_ms: 4.768
+      cpu_api: 6.12%
+      mem_api: 66.79MiB
+      cpu_storage: 4.31%
+      mem_storage: 191.1MiB
+      storage_bytes: 45983364
+      storage_mib: 43.9
+    - pair: csharp-victoriametrics
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2347
+      write_p95_ms: null
+      locf_p95_ms: 23.934
+      range_p95_ms: 347.502
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 23.918
+      storage_range_p95_ms: 346.871
+      api_p95_ms: 680.343
+      cpu_api: 0.01%
+      mem_api: 113.1MiB
+      cpu_storage: 0.06%
+      mem_storage: 57.4MiB
+      storage_bytes: 15492500
+      storage_mib: 14.8
+    - pair: rust-timescaledb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2387
+      write_p95_ms: null
+      locf_p95_ms: 8.877
+      range_p95_ms: 240.075
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 8.877
+      storage_range_p95_ms: 240.075
+      api_p95_ms: 317.427
+      cpu_api: 1.93%
+      mem_api: 16.04MiB
+      cpu_storage: 0.00%
+      mem_storage: 125.5MiB
+      storage_bytes: 1041690667
+      storage_mib: 993.4
+    - pair: rust-questdb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2856
+      write_p95_ms: null
+      locf_p95_ms: 4.757
+      range_p95_ms: 4.767
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 4.757
+      storage_range_p95_ms: 4.767
+      api_p95_ms: 4.762
+      cpu_api: 0.00%
+      mem_api: 4.695MiB
+      cpu_storage: 4.92%
+      mem_storage: 172.6MiB
+      storage_bytes: 45983364
+      storage_mib: 43.9
+    - pair: rust-victoriametrics
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2581
+      write_p95_ms: null
+      locf_p95_ms: 39.708
+      range_p95_ms: 205.9
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 39.708
+      storage_range_p95_ms: 205.9
+      api_p95_ms: 244.959
+      cpu_api: 0.00%
+      mem_api: 45.89MiB
+      cpu_storage: 0.19%
+      mem_storage: 55.56MiB
+      storage_bytes: 15492500
+      storage_mib: 14.8
+    ranks:
+      locf_p95_ms:
+      - rust-questdb
+      - csharp-questdb
+      - go-questdb
+      - go-timescaledb
+      - csharp-timescaledb
+      - go-victoriametrics
+      - rust-timescaledb
+      - csharp-victoriametrics
+      - rust-victoriametrics
+      range_p95_ms:
+      - go-questdb
+      - csharp-questdb
+      - rust-questdb
+      - go-victoriametrics
+      - rust-victoriametrics
+      - csharp-timescaledb
+      - rust-timescaledb
+      - csharp-victoriametrics
+      - go-timescaledb
+      storage_mib:
+      - go-victoriametrics
+      - csharp-victoriametrics
+      - rust-victoriametrics
+      - csharp-questdb
+      - rust-questdb
+      - go-questdb
+      - go-timescaledb
+      - csharp-timescaledb
+      - rust-timescaledb
+conclusions: 'Черновик по цифрам. Заменить человеческим выводом.
+
+
+  Сравнение пар: профиль query-mix за 3m.
+
+  Одинаковый resource envelope. Каждая пара — отдельный чистый старт. Сначала тот
+  же архив (год, частые и редкие теги), затем только locf/range. Эффективнее та, что
+  отвечает быстрее на locf и range без ошибок и занимает меньше места тем же архивом.
+  storage_*_p95 показывает, где сидит задержка — в БД или в API. Seed в scorecard
+  не входит.
+
+
+  pair                     status       ingest/s  w_err  q_err    w p95     locf    range     disk  cpu
+  api   cpu db
+
+  go-timescaledb           completed         n/a      0      0      n/a      4.8    373.0    993.4    0.00%    2.46%
+
+  go-questdb               completed         n/a      0      0      n/a      4.8      4.8    123.6    0.00%    5.25%
+
+  go-victoriametrics       completed         n/a      0      0      n/a      8.5    196.5     14.8    0.00%    0.16%
+
+  csharp-timescaledb       completed         n/a      0      0      n/a      5.0    236.3    993.4    0.02%    2.17%
+
+  csharp-questdb           completed         n/a      0      0      n/a      4.8      4.8     43.9    6.12%    4.31%
+
+  csharp-victoriametrics   completed         n/a      0      0      n/a     23.9    347.5     14.8    0.01%    0.06%
+
+  rust-timescaledb         completed         n/a      0      0      n/a      8.9    240.1    993.4    1.93%    0.00%
+
+  rust-questdb             completed         n/a      0      0      n/a      4.8      4.8     43.9    0.00%    4.92%
+
+  rust-victoriametrics     completed         n/a      0      0      n/a     39.7    205.9     14.8    0.00%    0.19%
+
+  locf:   rust-questdb > csharp-questdb > go-questdb > go-timescaledb > csharp-timescaledb
+  > go-victoriametrics > rust-timescaledb > csharp-victoriametrics > rust-victoriametrics  (меньше
+  p95 лучше)
+
+  range:  go-questdb > csharp-questdb > rust-questdb > go-victoriametrics > rust-victoriametrics
+  > csharp-timescaledb > rust-timescaledb > csharp-victoriametrics > go-timescaledb  (меньше
+  p95 лучше)
+
+  disk:   go-victoriametrics > csharp-victoriametrics > rust-victoriametrics > csharp-questdb
+  > rust-questdb > go-questdb > go-timescaledb > csharp-timescaledb > rust-timescaledb  (меньше
+  MiB лучше)
+
+  '
