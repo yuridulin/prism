@@ -16,13 +16,13 @@ Stretch и агрегаты в API нет — сравниваются толь�
 
 | Слой | Варианты |
 | --- | --- |
-| API | Go `:8081`, Python `:8082`, C# `:8083`, Rust `:8084` |
-| Storage | QuestDB, ClickHouse, TimescaleDB, InfluxDB 2, VictoriaMetrics |
+| API | Go `:8081`, C# `:8083`, Rust `:8084` |
+| Storage | TimescaleDB, QuestDB, VictoriaMetrics |
 | Шина | NATS JetStream (`prism.samples`) |
 | Наблюдение | Prometheus + Grafana |
 | Нагрузка | YAML-профили → генератор или k6 |
 
-Хранилище: `PRISM_STORAGE` / `GO_API_STORAGE` / `PYTHON_API_STORAGE` / `CSHARP_API_STORAGE` / `RUST_API_STORAGE`.
+Хранилище: `PRISM_STORAGE` / `GO_API_STORAGE` / `CSHARP_API_STORAGE` / `RUST_API_STORAGE`.
 
 ## Быстрый старт
 
@@ -48,13 +48,13 @@ curl -X POST http://localhost:8081/api/values -H "Content-Type: application/json
 
 Диспетчер гоняет **пары по очереди**: `down -v` → только API и БД пары → прогон → запись → снова `down -v`.
 
-Стартовые пары в `sessions/defaults.yaml`: Go/QuestDB, Go/ClickHouse, C#/QuestDB, Rust/QuestDB.
+Стартовые пары в `sessions/defaults.yaml`: полная матрица 3×3 (Go/C#/Rust × Timescale/QuestDB/VM).
 
 ```powershell
 pip install -r sessions/requirements.txt
 python sessions/run.py new --why "LOCF и range на годовом архиве" --profile query-mix
 python sessions/run.py run
-python sessions/run.py new --why "Только ClickHouse" --pairs go:clickhouse,csharp:clickhouse,rust:clickhouse --run
+python sessions/run.py new --why "Только QuestDB" --pairs go:questdb,csharp:questdb,rust:questdb --run
 ```
 
 ## Профили

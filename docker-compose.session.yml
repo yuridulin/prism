@@ -25,19 +25,13 @@ x-generator: &generator
 services:
   go-api:
     <<: *api
-  python-api:
-    <<: *api
   csharp-api:
     <<: *api
   rust-api:
     <<: *api
   timescaledb:
     <<: *storage
-  clickhouse:
-    <<: *storage
   questdb:
-    <<: *storage
-  influxdb:
     <<: *storage
   victoriametrics:
     <<: *storage

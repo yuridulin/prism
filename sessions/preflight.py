@@ -105,8 +105,6 @@ def _probe_tag_sql(storage: str) -> str:
     ids = ", ".join(str(i) for i in PROBE_TAG_IDS)
     if storage == "timescaledb":
         return f"DELETE FROM samples WHERE tag_id IN ({ids})"
-    if storage == "clickhouse":
-        return f"ALTER TABLE samples DELETE WHERE tag_id IN ({ids})"
     if storage == "questdb":
         symbols = ", ".join(f"'{i}'" for i in PROBE_TAG_IDS)
         return f"DELETE FROM samples WHERE tag_id IN ({symbols})"
@@ -124,53 +122,28 @@ def _probe_days(fixture: dict) -> set[str]:
 
 def cleanup_probe_samples(storage: str, fixture: dict | None = None) -> None:
     """Remove prior probe writes so each backend compares on the same three points."""
-    if storage in {"timescaledb", "clickhouse"}:
+    if storage == "timescaledb":
         sql = _probe_tag_sql(storage)
-        if storage == "timescaledb":
-            cmd = [
-                "docker",
-                "compose",
-                *COMPOSE_FILES,
-                "exec",
-                "-T",
-                "timescaledb",
-                "psql",
-                "-U",
-                "prism",
-                "-d",
-                "prism",
-                "-c",
-                sql,
-            ]
-            proc = subprocess.run(cmd, cwd=ROOT, check=False, text=True, capture_output=True)
-            if proc.returncode != 0:
-                detail = (proc.stderr or proc.stdout or "").strip()
-                raise SessionError(f"preflight cleanup {storage}: {detail}")
-            return
-        if storage == "clickhouse":
-            sync_sql = f"{sql} SETTINGS mutations_sync=1"
-            cmd = [
-                "docker",
-                "compose",
-                *COMPOSE_FILES,
-                "exec",
-                "-T",
-                "clickhouse",
-                "clickhouse-client",
-                "--user",
-                "prism",
-                "--password",
-                "prism",
-                "--database",
-                "prism",
-                "--query",
-                sync_sql,
-            ]
-            proc = subprocess.run(cmd, cwd=ROOT, check=False, text=True, capture_output=True)
-            if proc.returncode != 0:
-                detail = (proc.stderr or proc.stdout or "").strip()
-                raise SessionError(f"preflight cleanup {storage}: {detail}")
-            return
+        cmd = [
+            "docker",
+            "compose",
+            *COMPOSE_FILES,
+            "exec",
+            "-T",
+            "timescaledb",
+            "psql",
+            "-U",
+            "prism",
+            "-d",
+            "prism",
+            "-c",
+            sql,
+        ]
+        proc = subprocess.run(cmd, cwd=ROOT, check=False, text=True, capture_output=True)
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            raise SessionError(f"preflight cleanup {storage}: {detail}")
+        return
 
     if storage == "questdb":
         for day in sorted(_probe_days(fixture or {})):
@@ -179,28 +152,6 @@ def cleanup_probe_samples(storage: str, fixture: dict | None = None) -> None:
             if status >= 300:
                 raise SessionError(f"preflight cleanup questdb HTTP {status}: {body[:300]}")
         time.sleep(0.5)
-        return
-
-    if storage == "influxdb":
-        for tag_id in PROBE_TAG_IDS:
-            payload = json.dumps(
-                {
-                    "start": "1970-01-01T00:00:00Z",
-                    "stop": "2100-01-01T00:00:00Z",
-                    "predicate": f'tag_id="{tag_id}"',
-                }
-            ).encode("utf-8")
-            status, body = _http_text(
-                "POST",
-                "http://127.0.0.1:8086/api/v2/delete?org=prism&bucket=prism",
-                data=payload,
-                headers={
-                    "Authorization": "Token prism-dev-token",
-                    "Content-Type": "application/json",
-                },
-            )
-            if status >= 300:
-                raise SessionError(f"preflight cleanup influxdb HTTP {status}: {body[:300]}")
         return
 
     if storage == "victoriametrics":

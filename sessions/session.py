@@ -15,8 +15,8 @@ DEFAULTS_PATH = SESSIONS_DIR / "defaults.yaml"
 CATALOG_PATH = SESSIONS_DIR / "catalog.yaml"
 
 RESOURCE_GROUPS = ("api", "storage", "bus", "observe", "generator")
-VALID_BACKENDS = ("go", "python", "csharp", "rust")
-VALID_STORAGES = ("timescaledb", "clickhouse", "questdb", "influxdb", "victoriametrics")
+VALID_BACKENDS = ("go", "csharp", "rust")
+VALID_STORAGES = ("timescaledb", "questdb", "victoriametrics")
 ALL_STORAGES = list(VALID_STORAGES)
 
 VOLUME_SET_BY_PROFILE = {
@@ -30,36 +30,30 @@ VOLUME_SET_BY_PROFILE = {
 }
 STORAGE_VOLUME_SUFFIX = {
     "timescaledb": "timescale",
-    "clickhouse": "clickhouse",
     "questdb": "questdb",
-    "influxdb": "influx",
     "victoriametrics": "vm",
 }
-API_SERVICE = {"go": "go-api", "python": "python-api", "csharp": "csharp-api", "rust": "rust-api"}
+API_SERVICE = {"go": "go-api", "csharp": "csharp-api", "rust": "rust-api"}
 API_URL = {
     "go": "http://go-api:8081",
-    "python": "http://python-api:8082",
     "csharp": "http://csharp-api:8083",
     "rust": "http://rust-api:8084",
 }
 API_HOST = {
     "go": "http://127.0.0.1:8081",
-    "python": "http://127.0.0.1:8082",
     "csharp": "http://127.0.0.1:8083",
     "rust": "http://127.0.0.1:8084",
 }
-API_CONTAINER_PORT = {"go": 8081, "python": 8082, "csharp": 8083, "rust": 8084}
-PARALLEL_HOST_PORT_BASE = {"go": 8290, "python": 8390, "csharp": 8490, "rust": 8590}
+API_CONTAINER_PORT = {"go": 8081, "csharp": 8083, "rust": 8084}
+PARALLEL_HOST_PORT_BASE = {"go": 8290, "csharp": 8490, "rust": 8590}
 DISPATCH_MODES = ("parallel-by-backend", "by-backend", "by-pair")
 API_READY = {
     "go": "http://127.0.0.1:8081/readyz",
-    "python": "http://127.0.0.1:8082/readyz",
     "csharp": "http://127.0.0.1:8083/readyz",
     "rust": "http://127.0.0.1:8084/readyz",
 }
 API_META = {
     "go": "http://127.0.0.1:8081/api/meta",
-    "python": "http://127.0.0.1:8082/api/meta",
     "csharp": "http://127.0.0.1:8083/api/meta",
     "rust": "http://127.0.0.1:8084/api/meta",
 }
@@ -323,7 +317,6 @@ def compose_env(session: dict, pair: dict) -> dict[str, str]:
     skip_seed = bool(what.get("skip_seed") or what.get("reuse_volumes"))
     env = {
         "GO_API_STORAGE": pair["storage"],
-        "PYTHON_API_STORAGE": pair["storage"],
         "CSHARP_API_STORAGE": pair["storage"],
         "RUST_API_STORAGE": pair["storage"],
         "PRISM_STORAGE": pair["storage"],

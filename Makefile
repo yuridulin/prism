@@ -7,7 +7,7 @@ down:
 	docker compose --profile load down
 
 logs:
-	docker compose logs -f --tail=100 go-api python-api csharp-api rust-api
+	docker compose logs -f --tail=100 go-api csharp-api rust-api
 
 profiles:
 	python ingest/generator/generator.py --list

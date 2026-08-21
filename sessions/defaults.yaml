@@ -1,19 +1,23 @@
 # Starting characteristics for a new session.
-# Default dispatch: parallel API replicas per backend (one copy per storage), shared DBs.
+# Matrix: 3 API (Go, C#, Rust) × 3 storage (Timescale, QuestDB, VictoriaMetrics).
 
 duration: 5m
 dispatch: parallel-by-backend
 
 load:
   profile: iot-steady
-  # empty = use the profile's own transport
   transport: ""
 
 pairs:
+  - { backend: go, storage: timescaledb }
   - { backend: go, storage: questdb }
-  - { backend: go, storage: clickhouse }
+  - { backend: go, storage: victoriametrics }
+  - { backend: csharp, storage: timescaledb }
   - { backend: csharp, storage: questdb }
+  - { backend: csharp, storage: victoriametrics }
+  - { backend: rust, storage: timescaledb }
   - { backend: rust, storage: questdb }
+  - { backend: rust, storage: victoriametrics }
 
 resources:
   api:

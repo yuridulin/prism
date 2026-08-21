@@ -21,33 +21,6 @@ services:
       timeout: 5s
       retries: 10
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.8
-    restart: unless-stopped
-    environment:
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-prism}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-prism}
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-prism}
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    ports:
-      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
-      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - ./infra/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
-      - ./infra/clickhouse/users.d/prism.xml:/etc/clickhouse-server/users.d/prism.xml:ro
-    healthcheck:
-      test: ["CMD", "clickhouse-client", "--user", "${CLICKHOUSE_USER:-prism}", "--password", "${CLICKHOUSE_PASSWORD:-prism}", "--query", "SELECT 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 15
-      start_period: 15s
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-
   questdb:
     image: questdb/questdb:8.2.2
     restart: unless-stopped
@@ -62,30 +35,6 @@ services:
     volumes:
       - questdb_data:/var/lib/questdb
     # Image has no curl; APIs create tables on ping.
-
-  influxdb:
-    image: influxdb:2.7
-    restart: unless-stopped
-    environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_USER:-prism}
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:-prismprism}
-      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-prism}
-      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-prism}
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
-      DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUX_RETENTION:-400d}
-      INFLUXD_STORAGE_CACHE_MAX_MEMORY_SIZE: "268435456"
-      INFLUXD_QUERY_CONCURRENCY: "8"
-    ports:
-      - "${INFLUX_PORT:-8086}:8086"
-    volumes:
-      - influx_data:/var/lib/influxdb2
-    healthcheck:
-      test: ["CMD", "influx", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 15
-      start_period: 10s
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.110.0
@@ -133,7 +82,6 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     volumes:
@@ -151,43 +99,13 @@ services:
       PRISM_STORAGE: ${GO_API_STORAGE:-questdb}
       HTTP_ADDR: ":8081"
       POSTGRES_DSN: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@timescaledb:5432/${POSTGRES_DB:-prism}?sslmode=disable
-      CLICKHOUSE_DSN: clickhouse://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:9000/${CLICKHOUSE_DB:-prism}
       QUESTDB_URL: http://questdb:9000
       QUESTDB_ILP: questdb:9009
-      INFLUX_URL: http://influxdb:8086
-      INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
-      INFLUX_ORG: ${INFLUX_ORG:-prism}
-      INFLUX_BUCKET: ${INFLUX_BUCKET:-prism}
       VM_URL: http://victoriametrics:8428
       NATS_URL: nats://nats:4222
       NATS_SUBJECT: ${NATS_SUBJECT:-prism.samples}
     ports:
       - "${GO_API_PORT:-8081}:8081"
-    depends_on:
-      nats:
-        condition: service_started
-
-  python-api:
-    build:
-      context: ./apps/python-api
-    restart: unless-stopped
-    environment:
-      PRISM_STORAGE: ${PYTHON_API_STORAGE:-questdb}
-      HTTP_ADDR: "0.0.0.0:8082"
-      POSTGRES_DSN: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@timescaledb:5432/${POSTGRES_DB:-prism}
-      CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:8123
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-prism}
-      QUESTDB_URL: http://questdb:9000
-      QUESTDB_ILP: questdb:9009
-      INFLUX_URL: http://influxdb:8086
-      INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
-      INFLUX_ORG: ${INFLUX_ORG:-prism}
-      INFLUX_BUCKET: ${INFLUX_BUCKET:-prism}
-      VM_URL: http://victoriametrics:8428
-      NATS_URL: nats://nats:4222
-      NATS_SUBJECT: ${NATS_SUBJECT:-prism.samples}
-    ports:
-      - "${PYTHON_API_PORT:-8082}:8082"
     depends_on:
       nats:
         condition: service_started
@@ -200,14 +118,8 @@ services:
       PRISM_STORAGE: ${CSHARP_API_STORAGE:-questdb}
       HTTP_ADDR: "0.0.0.0:8083"
       POSTGRES_DSN: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@timescaledb:5432/${POSTGRES_DB:-prism}?sslmode=disable
-      CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:8123
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-prism}
       QUESTDB_URL: http://questdb:9000
       QUESTDB_ILP: questdb:9009
-      INFLUX_URL: http://influxdb:8086
-      INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
-      INFLUX_ORG: ${INFLUX_ORG:-prism}
-      INFLUX_BUCKET: ${INFLUX_BUCKET:-prism}
       VM_URL: http://victoriametrics:8428
       NATS_URL: nats://nats:4222
       NATS_SUBJECT: ${NATS_SUBJECT:-prism.samples}
@@ -225,14 +137,8 @@ services:
       PRISM_STORAGE: ${RUST_API_STORAGE:-questdb}
       HTTP_ADDR: "0.0.0.0:8084"
       POSTGRES_DSN: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@timescaledb:5432/${POSTGRES_DB:-prism}?sslmode=disable
-      CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-prism}:${CLICKHOUSE_PASSWORD:-prism}@clickhouse:8123
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-prism}
       QUESTDB_URL: http://questdb:9000
       QUESTDB_ILP: questdb:9009
-      INFLUX_URL: http://influxdb:8086
-      INFLUX_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
-      INFLUX_ORG: ${INFLUX_ORG:-prism}
-      INFLUX_BUCKET: ${INFLUX_BUCKET:-prism}
       VM_URL: http://victoriametrics:8428
       NATS_URL: nats://nats:4222
       NATS_SUBJECT: ${NATS_SUBJECT:-prism.samples}
@@ -274,12 +180,8 @@ services:
 volumes:
   timescale_data:
     name: prism_timescale_${PRISM_VOLUME_SET:-data}
-  clickhouse_data:
-    name: prism_clickhouse_${PRISM_VOLUME_SET:-data}
   questdb_data:
     name: prism_questdb_${PRISM_VOLUME_SET:-data}
-  influx_data:
-    name: prism_influx_${PRISM_VOLUME_SET:-data}
   vm_data:
     name: prism_vm_${PRISM_VOLUME_SET:-data}
   prometheus_data:

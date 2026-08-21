@@ -21,10 +21,9 @@ COMPOSE = [
     "--env-file",
     str(ENV),
 ]
-STORAGES = ("timescaledb", "clickhouse", "questdb", "influxdb", "victoriametrics")
+STORAGES = ("timescaledb", "questdb", "victoriametrics")
 API_READY = {
     "go": "http://127.0.0.1:8081/readyz",
-    "python": "http://127.0.0.1:8082/readyz",
     "csharp": "http://127.0.0.1:8083/readyz",
     "rust": "http://127.0.0.1:8084/readyz",
 }
@@ -67,7 +66,7 @@ def wait_ready(url: str, timeout: int = 240) -> None:
 
 
 def main() -> int:
-    run(COMPOSE + ["up", "-d", "--build", "nats", "prometheus", "timescaledb", "clickhouse", "questdb", "influxdb", "victoriametrics"])
+    run(COMPOSE + ["up", "-d", "--build", "nats", "prometheus", "timescaledb", "questdb", "victoriametrics"])
     for storage in STORAGES:
         print(f"=== seed {storage} ===", flush=True)
         set_go_storage(storage)
@@ -78,15 +77,13 @@ def main() -> int:
             raise SystemExit(f"generator failed for {storage}")
     print("=== restore API map ===", flush=True)
     set_go_storage("timescaledb")
-    run(COMPOSE + ["up", "-d", "--build", "--force-recreate", "go-api", "python-api", "csharp-api", "rust-api"])
+    run(COMPOSE + ["up", "-d", "--build", "--force-recreate", "go-api", "csharp-api", "rust-api"])
     for url in API_READY.values():
         wait_ready(url)
     print("lab ready", flush=True)
     print("  go-api:8081 -> timescaledb", flush=True)
-    print("  python-api:8082 -> clickhouse", flush=True)
-    print("  csharp-api:8083 -> influxdb", flush=True)
-    print("  rust-api:8084 -> questdb", flush=True)
-    print("  victoriametrics:8428 (native; no dedicated API)", flush=True)
+    print("  csharp-api:8083 -> questdb", flush=True)
+    print("  rust-api:8084 -> victoriametrics", flush=True)
     return 0
 
 

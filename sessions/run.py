@@ -58,9 +58,7 @@ PROMETHEUS_BASE = ROOT / "infra" / "prometheus" / "prometheus.yml"
 
 STORAGE_DATA_PATH = {
     "timescaledb": "/var/lib/postgresql/data",
-    "clickhouse": "/var/lib/clickhouse",
     "questdb": "/var/lib/questdb",
-    "influxdb": "/var/lib/influxdb2",
     "victoriametrics": "/victoria-metrics-data",
 }
 
@@ -1011,7 +1009,7 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--transport", help="nats or http")
     new.add_argument(
         "--pairs",
-        help="comma-separated backend:storage, e.g. go:timescaledb,python:influxdb",
+        help="comma-separated backend:storage, e.g. go:timescaledb,rust:questdb",
     )
     new.add_argument("--run", action="store_true", help="dispatch immediately")
     new.add_argument("--fail-fast", action="store_true")
@@ -1032,7 +1030,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="dispatch pairs and record scorecard")
     run.add_argument("id", nargs="?", help="session id; defaults to the latest planned")
-    run.add_argument("--from-pair", help="resume from this pair slug, e.g. python-influxdb")
+    run.add_argument("--from-pair", help="resume from this pair slug, e.g. rust-questdb")
     run.add_argument("--only-pair", help="run a single pair slug and keep the rest of the session")
     run.add_argument("--fail-fast", action="store_true")
     run.add_argument("--keep", action="store_true", help="reuse volumes, skip wipe and archive seed")
