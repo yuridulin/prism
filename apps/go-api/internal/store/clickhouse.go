@@ -68,27 +68,19 @@ func (s *ClickHouse) insert(ctx context.Context, samples []model.Sample) error {
 	return batch.Send()
 }
 
-const chLocfLookback = 48 * time.Hour
+const chLocfLookback = 3 * time.Hour
 
 const chLocfSQL = `
-		SELECT s.ts, s.tag_id, s.value, s.quality
+		SELECT max(s.ts) AS ts, s.tag_id, argMax(s.value, s.ts) AS value, argMax(s.quality, s.ts) AS quality
 		FROM samples AS s
-		WHERE (s.tag_id, s.ts) IN (
-			SELECT t.tag_id, max(t.ts)
-			FROM samples AS t
-			WHERE t.tag_id IN ? AND t.ts <= ?
-			GROUP BY t.tag_id
-		)`
+		WHERE s.tag_id IN ? AND s.ts <= ?
+		GROUP BY s.tag_id`
 
 const chLocfBoundedSQL = `
-		SELECT s.ts, s.tag_id, s.value, s.quality
+		SELECT max(s.ts) AS ts, s.tag_id, argMax(s.value, s.ts) AS value, argMax(s.quality, s.ts) AS quality
 		FROM samples AS s
-		WHERE (s.tag_id, s.ts) IN (
-			SELECT t.tag_id, max(t.ts)
-			FROM samples AS t
-			WHERE t.tag_id IN ? AND t.ts <= ? AND t.ts >= ?
-			GROUP BY t.tag_id
-		)`
+		WHERE s.tag_id IN ? AND s.ts <= ? AND s.ts >= ?
+		GROUP BY s.tag_id`
 
 func (s *ClickHouse) Locf(ctx context.Context, tagIDs []uint32, at time.Time) ([]model.Sample, error) {
 	out, err := s.locf(ctx, tagIDs, at, true)
@@ -132,8 +124,7 @@ func (s *ClickHouse) Range(ctx context.Context, tagIDs []uint32, from, to time.T
 	rows, err := s.conn.Query(ctx, `
 		SELECT s.ts, s.tag_id, s.value, s.quality
 		FROM samples AS s
-		WHERE s.tag_id IN ? AND s.ts > ? AND s.ts <= ?
-		ORDER BY s.tag_id, s.ts`, tagIDs, from.UTC(), to.UTC())
+		WHERE s.tag_id IN ? AND s.ts > ? AND s.ts <= ?`, tagIDs, from.UTC(), to.UTC())
 	if err != nil {
 		return nil, err
 	}

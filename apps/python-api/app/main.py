@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import ORJSONResponse, PlainTextResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.exceptions import HTTPException as StarletteHTTPException
+import orjson
 
 from app.config import SUPPORTED, settings
 from app.errors import http_error_handler, validation_error_handler
@@ -20,9 +21,7 @@ from app.models import (
     TagWriteRequest,
     TagWriteResponse,
     ValuesRequest,
-    ValuesResponse,
-    WriteItem,
-    WriteResponse,
+    samples_from_payload,
 )
 from app.nats_consumer import run_consumer
 from app.read import assemble
@@ -53,7 +52,7 @@ async def lifespan(_: FastAPI):
     await store.close()
 
 
-app = FastAPI(title="Prism Python API", lifespan=lifespan)
+app = FastAPI(title="Prism Python API", lifespan=lifespan, default_response_class=ORJSONResponse)
 app.add_exception_handler(StarletteHTTPException, http_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 
@@ -112,15 +111,15 @@ async def upsert_tags(req: TagWriteRequest) -> TagWriteResponse:
     return TagWriteResponse(upserted=len(req.tags))
 
 
-@app.put("/api/values", response_model=WriteResponse)
-async def write_values(items: list[WriteItem]) -> WriteResponse:
-    if not items:
-        raise HTTPException(status_code=400, detail="values array is required")
-    now = datetime.now(timezone.utc)
+@app.put("/api/values")
+async def write_values(request: Request) -> dict:
     try:
-        samples = [item.to_sample(now) for item in items]
+        payload = orjson.loads(await request.body())
+        samples = samples_from_payload(payload, datetime.now(timezone.utc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except orjson.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="values array is required") from exc
     with track() as elapsed:
         try:
             await store.write(samples)
@@ -128,11 +127,11 @@ async def write_values(items: list[WriteItem]) -> WriteResponse:
             observe_backend(store.name, "write", "http", 0, elapsed(), exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
     observe_backend(store.name, "write", "http", len(samples), elapsed())
-    return WriteResponse(written=len(samples))
+    return {"written": len(samples)}
 
 
-@app.post("/api/values", response_model=ValuesResponse)
-async def read_values(req: ValuesRequest) -> ValuesResponse:
+@app.post("/api/values")
+async def read_values(req: ValuesRequest) -> dict:
     if not req.tags_id:
         raise HTTPException(status_code=400, detail="tagsId is required")
     mode = req.mode()

@@ -1,0 +1,76 @@
+backend: rust
+storage: questdb
+status: completed
+when:
+  started_at: '2026-08-21T13:01:07Z'
+  finished_at: '2026-08-21T13:06:33Z'
+services:
+- nats
+- questdb
+- rust-api
+- prometheus
+reuse_volumes: false
+generator:
+  profile: query-mix
+  written: 4835600
+  queries: 2243
+  write_errors: 0
+  query_errors: 2406
+  elapsed_seconds: 316.3
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 16.3
+  query_elapsed_seconds: 300.0
+meta:
+  backend: rust
+  storage: questdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: rust
+  storage: questdb
+  ingest_rate: 0.0
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.01022913775815813
+  range_p95_seconds: 0.15399304590978696
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.010229114877441919
+  storage_range_p95_seconds: 0.15399301426772413
+  api_p95_seconds: 0.08741792936339829
+  locf_error_rate: null
+  range_error_rate: 8.035200868216213
+resources:
+  raw:
+  - name: prism-rust-api-1
+    cpu: 0.03%
+    mem: 93.05MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 6.043MiB
+  - name: prism-prometheus-1
+    cpu: 0.16%
+    mem: 29.33MiB
+  - name: prism-questdb-1
+    cpu: 8.06%
+    mem: 633.5MiB
+  api:
+    cpu: 0.03%
+    mem: 93.05MiB
+  storage:
+    cpu: 8.06%
+    mem: 633.5MiB
+storage_size:
+  bytes: 445328268
+  mib: 424.7
+  volume: prism_questdb_data
+  path: /var/lib/questdb

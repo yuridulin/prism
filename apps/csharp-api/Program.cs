@@ -141,8 +141,12 @@ app.MapPut("/api/values", async (List<WriteSample>? items, CancellationToken ct)
         return ApiErrors.Invalid("values array is required");
     }
 
-    var now = DateTimeOffset.UtcNow;
-    var samples = items.Select(s => s.Normalize(now)).ToList();
+        var now = DateTimeOffset.UtcNow;
+        var samples = new List<Sample>(items.Count);
+        foreach (var item in items)
+        {
+            samples.Add(item.Normalize(now));
+        }
     var start = Stopwatch.StartNew();
     try
     {

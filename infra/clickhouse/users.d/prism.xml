@@ -1,0 +1,12 @@
+<clickhouse>
+    <profiles>
+        <default>
+            <!-- Container envelope is 1 CPU / 1G; host nproc would oversubscribe. -->
+            <max_threads>1</max_threads>
+            <max_insert_threads>1</max_insert_threads>
+            <async_insert>1</async_insert>
+            <wait_for_async_insert>1</wait_for_async_insert>
+            <async_insert_busy_timeout_ms>10</async_insert_busy_timeout_ms>
+        </default>
+    </profiles>
+</clickhouse>

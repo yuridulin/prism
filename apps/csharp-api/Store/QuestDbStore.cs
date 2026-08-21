@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using Prism.Api.Models;
 
@@ -77,8 +78,7 @@ public sealed class QuestDbStore : IStore
                 WHERE tag_id IN ({ids}) AND ts > '{StoreUtil.QuestDbTime(from)}' AND ts <= '{StoreUtil.QuestDbTime(to)}'
             )
             """;
-        var data = await Exec(ct, q);
-        return ParseSamples(data, hasCarried: true);
+        return await ExpSamples(ct, q);
     }
 
     public async Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)
@@ -150,6 +150,110 @@ public sealed class QuestDbStore : IStore
         }
 
         return data;
+    }
+
+    private async Task<List<Sample>> ExpSamples(CancellationToken ct, string query)
+    {
+        var url = _base + "/exp?query=" + Uri.EscapeDataString(query);
+        using var resp = await _http.GetAsync(url, ct);
+        await StoreUtil.EnsureSuccess(resp, "questdb exp", ct);
+        var text = await resp.Content.ReadAsStringAsync(ct);
+        return ParseCsvSamples(text);
+    }
+
+    private static List<Sample> ParseCsvSamples(string text)
+    {
+        var output = new List<Sample>(4096);
+        using var reader = new StringReader(text);
+        var header = reader.ReadLine();
+        if (header is null)
+        {
+            return output;
+        }
+
+        var cols = SplitCsvLine(header);
+        var idx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < cols.Length; i++)
+        {
+            idx[cols[i].Trim()] = i;
+        }
+
+        if (!idx.TryGetValue("ts", out var tsI) || !idx.TryGetValue("tag_id", out var tagI)
+            || !idx.TryGetValue("value", out var valI) || !idx.TryGetValue("quality", out var qI))
+        {
+            throw new InvalidOperationException("questdb csv columns " + header);
+        }
+
+        idx.TryGetValue("carried", out var cI);
+        var hasCarried = idx.ContainsKey("carried");
+        while (reader.ReadLine() is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var row = SplitCsvLine(line);
+            if (tsI >= row.Length || tagI >= row.Length || valI >= row.Length || qI >= row.Length)
+            {
+                continue;
+            }
+
+            var sample = new Sample
+            {
+                Ts = ParseTs(row[tsI]),
+                TagId = (uint)AsFloat(row[tagI]),
+                Value = AsFloat(row[valI]),
+                Quality = (ushort)AsFloat(row[qI]),
+                Carried = hasCarried && cI < row.Length && AsBool(row[cI])
+            };
+            output.Add(sample);
+        }
+
+        return output;
+    }
+
+    private static string[] SplitCsvLine(string line)
+    {
+        var cols = new List<string>();
+        var sb = new StringBuilder();
+        var inQuotes = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            var c = line[i];
+            if (inQuotes)
+            {
+                if (c == '"' && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i++;
+                }
+                else if (c == '"')
+                {
+                    inQuotes = false;
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            else if (c == '"')
+            {
+                inQuotes = true;
+            }
+            else if (c == ',')
+            {
+                cols.Add(sb.ToString());
+                sb.Clear();
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+
+        cols.Add(sb.ToString());
+        return cols.ToArray();
     }
 
     private static readonly JsonSerializerOptions JsonOpts = new()

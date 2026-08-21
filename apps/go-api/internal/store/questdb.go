@@ -3,8 +3,10 @@ package store
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -203,11 +205,7 @@ func (s *QuestDB) Range(ctx context.Context, tagIDs []uint32, from, to time.Time
 			FROM samples
 			WHERE tag_id IN (%s) AND ts > '%s' AND ts <= '%s'
 		)`, ids, qdbTime(from), ids, qdbTime(from), qdbTime(to))
-	data, err := s.exec(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	return parseQDBSamples(data, true)
+	return s.expSamples(ctx, q)
 }
 
 func (s *QuestDB) UpsertTags(ctx context.Context, tags []model.Tag) error {
@@ -260,6 +258,75 @@ func (s *QuestDB) exec(ctx context.Context, query string) (*qdbExec, error) {
 		return nil, fmt.Errorf("questdb: %s", out.Error)
 	}
 	return &out, nil
+}
+
+func (s *QuestDB) expSamples(ctx context.Context, query string) ([]model.Sample, error) {
+	u := s.base + "/exp?query=" + url.QueryEscape(query)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer closeHTTP(resp)
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("questdb exp %d: %s", resp.StatusCode, body)
+	}
+	return parseQDBCSV(resp.Body)
+}
+
+func parseQDBCSV(r io.Reader) ([]model.Sample, error) {
+	cr := csv.NewReader(r)
+	cr.ReuseRecord = true
+	cr.LazyQuotes = true
+	header, err := cr.Read()
+	if err == io.EOF {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	idx := map[string]int{}
+	for i, name := range header {
+		idx[strings.ToLower(strings.TrimSpace(name))] = i
+	}
+	tsI, okTS := idx["ts"]
+	tagI, okTag := idx["tag_id"]
+	valI, okVal := idx["value"]
+	qI, okQ := idx["quality"]
+	cI, hasCarried := idx["carried"]
+	if !okTS || !okTag || !okVal || !okQ {
+		return nil, fmt.Errorf("questdb csv columns %v", header)
+	}
+	out := make([]model.Sample, 0, 4096)
+	for {
+		row, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if tsI >= len(row) || tagI >= len(row) || valI >= len(row) || qI >= len(row) {
+			continue
+		}
+		ts, err := parseQDBTS(row[tsI])
+		if err != nil {
+			return nil, err
+		}
+		tag, _ := strconv.ParseUint(row[tagI], 10, 32)
+		val, _ := strconv.ParseFloat(row[valI], 64)
+		q, _ := strconv.ParseUint(row[qI], 10, 16)
+		s := model.Sample{TS: ts, TagID: uint32(tag), Value: val, Quality: uint16(q)}
+		if hasCarried && cI < len(row) {
+			s.Carried = asBool(row[cI])
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 func parseQDBSamples(data *qdbExec, hasCarried bool) ([]model.Sample, error) {

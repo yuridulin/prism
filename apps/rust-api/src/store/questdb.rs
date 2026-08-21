@@ -17,7 +17,7 @@ pub struct QuestDb {
     base: String,
     ilp_addr: String,
     client: reqwest::Client,
-    conn: Mutex<Option<TcpStream>>,
+    pool: Mutex<Vec<TcpStream>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,32 +49,40 @@ impl QuestDb {
             base: http_url.trim_end_matches('/').to_string(),
             ilp_addr,
             client: http_client(),
-            conn: Mutex::new(None),
+            pool: Mutex::new(Vec::new()),
         }
     }
 
     async fn send_ilp(&self, body: &[u8]) -> Result<()> {
         match self.send_ilp_once(body).await {
             Ok(()) => Ok(()),
-            Err(_) => {
-                *self.conn.lock().await = None;
-                self.send_ilp_once(body).await
-            }
+            Err(_) => self.send_ilp_once(body).await,
         }
     }
 
     async fn send_ilp_once(&self, body: &[u8]) -> Result<()> {
-        let mut guard = self.conn.lock().await;
-        if guard.is_none() {
-            let stream = TcpStream::connect(&self.ilp_addr)
+        let mut stream = {
+            let mut pool = self.pool.lock().await;
+            pool.pop()
+        };
+        if stream.is_none() {
+            let created = TcpStream::connect(&self.ilp_addr)
                 .await
                 .map_err(StoreError::new)?;
-            let _ = stream.set_nodelay(true);
-            *guard = Some(stream);
+            let _ = created.set_nodelay(true);
+            stream = Some(created);
         }
-        let stream = guard.as_mut().expect("ilp stream");
-        stream.write_all(body).await.map_err(StoreError::new)?;
-        stream.flush().await.map_err(StoreError::new)?;
+        let mut stream = stream.expect("ilp stream");
+        if let Err(err) = stream.write_all(body).await {
+            return Err(StoreError::new(err));
+        }
+        if let Err(err) = stream.flush().await {
+            return Err(StoreError::new(err));
+        }
+        let mut pool = self.pool.lock().await;
+        if pool.len() < 8 {
+            pool.push(stream);
+        }
         Ok(())
     }
 
@@ -85,6 +93,21 @@ impl QuestDb {
     async fn exec_samples(&self, query: &str) -> Result<Vec<Sample>> {
         let out: QdbSampleExec = self.exec_json(query).await?;
         Ok(out.dataset.into_iter().map(|row| row.0).collect())
+    }
+
+    async fn exp_samples(&self, query: &str) -> Result<Vec<Sample>> {
+        let mut u = Url::parse(&format!("{}/exp", self.base))?;
+        u.query_pairs_mut().append_pair("query", query);
+        let resp = self.client.get(u).send().await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            return Err(StoreError::new(format!(
+                "questdb exp {status}: {}",
+                text.chars().take(500).collect::<String>()
+            )));
+        }
+        parse_qdb_csv(&text)
     }
 
     async fn exec_json<T>(&self, query: &str) -> Result<T>
@@ -152,9 +175,75 @@ fn as_f64(v: &serde_json::Value) -> f64 {
     }
 }
 
+fn parse_qdb_csv(text: &str) -> Result<Vec<Sample>> {
+    let mut lines = text.lines();
+    let Some(header) = lines.next() else {
+        return Ok(Vec::new());
+    };
+    let header = header.trim_end_matches('\r');
+    let cols: Vec<&str> = header.split(',').map(|s| s.trim()).collect();
+    let idx = |name: &str| cols.iter().position(|c| c.eq_ignore_ascii_case(name));
+    let (Some(ts_i), Some(tag_i), Some(val_i), Some(q_i)) =
+        (idx("ts"), idx("tag_id"), idx("value"), idx("quality"))
+    else {
+        return Err(StoreError::new(format!("questdb csv columns {header}")));
+    };
+    let c_i = idx("carried");
+    let mut out = Vec::new();
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let row: Vec<&str> = line.split(',').collect();
+        if ts_i >= row.len() || tag_i >= row.len() || val_i >= row.len() || q_i >= row.len() {
+            continue;
+        }
+        let ts = match parse_qdb_ts_str(row[ts_i].trim().trim_matches('"')) {
+            Ok(ts) => ts,
+            Err(()) => continue,
+        };
+        let tag_id: u32 = row[tag_i].trim_matches('"').parse().unwrap_or(0);
+        let value: f64 = row[val_i].parse().unwrap_or(0.0);
+        let quality: u16 = row[q_i].parse::<f64>().unwrap_or(0.0) as u16;
+        let carried = c_i
+            .and_then(|i| row.get(i))
+            .map(|v| matches!(*v, "true" | "t" | "1"))
+            .unwrap_or(false);
+        out.push(Sample {
+            ts,
+            tag_id,
+            value,
+            quality,
+            carried,
+        });
+    }
+    Ok(out)
+}
+
 fn parse_qdb_ts_str(s: &str) -> std::result::Result<DateTime<Utc>, ()> {
-    if let Ok(n) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ") {
-        return Ok(n.and_utc());
+    let s = s.trim();
+    if let Ok(n) = s.parse::<i64>() {
+        if n > 10_000_000_000_000 {
+            return DateTime::from_timestamp_micros(n).ok_or(());
+        }
+        if n > 10_000_000_000 {
+            return DateTime::from_timestamp_millis(n).ok_or(());
+        }
+        return DateTime::from_timestamp(n, 0).ok_or(());
+    }
+    const FMTS: &[&str] = &[
+        "%Y-%m-%dT%H:%M:%S%.6fZ",
+        "%Y-%m-%dT%H:%M:%S%.fZ",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S%.6f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.6f",
+        "%Y-%m-%d %H:%M:%S",
+    ];
+    for fmt in FMTS {
+        if let Ok(n) = NaiveDateTime::parse_from_str(s, fmt) {
+            return Ok(n.and_utc());
+        }
     }
     DateTime::parse_from_rfc3339(s)
         .map(|t| t.with_timezone(&Utc))
@@ -382,7 +471,7 @@ impl Store for QuestDb {
             qdb_time(from),
             qdb_time(to)
         );
-        self.exec_samples(&q).await
+        self.exp_samples(&q).await
     }
 
     async fn upsert_tags(&self, tags: &[Tag]) -> Result<()> {

@@ -104,3 +104,59 @@ sessions:
   - go-influxdb
   - go-victoriametrics
   path: sessions/20260820T180620-query-mix/session.yaml
+- id: 20260821T095609-write-ceiling
+  status: completed
+  created_at: '2026-08-21T09:56:09Z'
+  why: adapter+schema ingest speedup vs arena-baseline
+  profile: write-ceiling
+  duration: 3m
+  pairs:
+  - go-questdb
+  - go-clickhouse
+  - go-timescaledb
+  - go-influxdb
+  - go-victoriametrics
+  - python-questdb
+  - python-clickhouse
+  - python-timescaledb
+  - python-influxdb
+  - python-victoriametrics
+  - csharp-questdb
+  - csharp-clickhouse
+  - csharp-timescaledb
+  - csharp-influxdb
+  - csharp-victoriametrics
+  - rust-questdb
+  - rust-clickhouse
+  - rust-timescaledb
+  - rust-influxdb
+  - rust-victoriametrics
+  path: sessions/20260821T095609-write-ceiling/session.yaml
+- id: 20260821T113416-query-mix
+  status: completed
+  created_at: '2026-08-21T11:34:16Z'
+  why: adapter+schema query-mix vs 20260820T180620
+  profile: query-mix
+  duration: 5m
+  pairs:
+  - go-questdb
+  - go-clickhouse
+  - go-timescaledb
+  - go-influxdb
+  - go-victoriametrics
+  - python-questdb
+  - python-clickhouse
+  - python-timescaledb
+  - python-influxdb
+  - python-victoriametrics
+  - csharp-questdb
+  - csharp-clickhouse
+  - csharp-timescaledb
+  - csharp-influxdb
+  - csharp-victoriametrics
+  - rust-questdb
+  - rust-clickhouse
+  - rust-timescaledb
+  - rust-influxdb
+  - rust-victoriametrics
+  path: sessions/20260821T113416-query-mix/session.yaml

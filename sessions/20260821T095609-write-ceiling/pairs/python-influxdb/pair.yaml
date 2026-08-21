@@ -1,0 +1,76 @@
+backend: python
+storage: influxdb
+status: completed
+when:
+  started_at: '2026-08-21T10:54:53Z'
+  finished_at: '2026-08-21T10:58:02Z'
+services:
+- nats
+- influxdb
+- python-api
+- prometheus
+reuse_volumes: false
+generator:
+  profile: write-ceiling
+  written: 10268250
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 57045.3
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: python
+  storage: influxdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: python
+  storage: influxdb
+  ingest_rate: 57004.73706165037
+  write_error_rate: null
+  write_p95_seconds: 0.04438550616361595
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.044349943799175694
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.04971496634113965
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-python-api-1
+    cpu: 0.12%
+    mem: 45.69MiB
+  - name: prism-nats-1
+    cpu: 0.04%
+    mem: 6.777MiB
+  - name: prism-influxdb-1
+    cpu: 0.06%
+    mem: 316.6MiB
+  - name: prism-prometheus-1
+    cpu: 0.29%
+    mem: 30.18MiB
+  api:
+    cpu: 0.12%
+    mem: 45.69MiB
+  storage:
+    cpu: 0.06%
+    mem: 316.6MiB
+storage_size:
+  bytes: 134794264
+  mib: 128.5
+  volume: prism_influx_data
+  path: /var/lib/influxdb2

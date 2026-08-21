@@ -63,53 +63,80 @@ public sealed class TimescaleStore : IStore
 
     public async Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default)
     {
-        await using var conn = await Open(ct);
-        await using var cmd = new NpgsqlCommand(
-            """
-            SELECT s.ts, s.tag_id, s.value, s.quality
-            FROM unnest($1::int4[]) AS t(tag_id)
-            CROSS JOIN LATERAL (
-                SELECT ts, tag_id, value, quality
-                FROM samples
-                WHERE samples.tag_id = t.tag_id AND ts <= $2
-                ORDER BY ts DESC
-                LIMIT 1
-            ) s
-            """, conn);
-        cmd.Parameters.Add(new NpgsqlParameter { Value = StoreUtil.IntTags(tagIds) });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = at.UtcDateTime });
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await ScanSamples(reader, carried: false, ct);
+        var rows = await LocfQuery(tagIds, at, bounded: true, ct);
+        var missing = MissingTagIds(tagIds, rows);
+        if (missing.Count == 0)
+        {
+            return rows;
+        }
+
+        var rest = await LocfQuery(missing, at, bounded: false, ct);
+        if (rest.Count == 0)
+        {
+            return rows;
+        }
+
+        var merged = new List<Sample>(rows.Count + rest.Count);
+        merged.AddRange(rows);
+        merged.AddRange(rest);
+        return merged;
     }
 
     public async Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
     {
+        var head = await LocfAsync(tagIds, from, ct);
         await using var conn = await Open(ct);
         await using var cmd = new NpgsqlCommand(
             """
-            SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
-                FROM unnest($1::int4[]) AS t(tag_id)
-                CROSS JOIN LATERAL (
-                    SELECT ts, tag_id, value, quality
-                    FROM samples
-                    WHERE samples.tag_id = t.tag_id AND ts <= $2
-                    ORDER BY ts DESC
-                    LIMIT 1
-                ) s
-                UNION ALL
-                SELECT ts, tag_id, value, quality, false
-                FROM samples
-                WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-            ) q
+            SELECT ts, tag_id, value, quality
+            FROM samples
+            WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
             ORDER BY tag_id, ts
             """, conn);
-        var ids = StoreUtil.IntTags(tagIds);
-        cmd.Parameters.Add(new NpgsqlParameter { Value = ids });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = StoreUtil.IntTags(tagIds) });
         cmd.Parameters.Add(new NpgsqlParameter { Value = from.UtcDateTime });
         cmd.Parameters.Add(new NpgsqlParameter { Value = to.UtcDateTime });
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await ScanSamples(reader, carried: null, ct);
+        var tail = await ScanSamples(reader, carried: false, ct);
+        return MergeRange(tagIds, head, tail);
+    }
+
+    private async Task<IReadOnlyList<Sample>> LocfQuery(IReadOnlyList<uint> tagIds, DateTimeOffset at, bool bounded, CancellationToken ct)
+    {
+        await using var conn = await Open(ct);
+        await using var cmd = new NpgsqlCommand(
+            bounded
+                ? """
+                  SELECT s.ts, s.tag_id, s.value, s.quality
+                  FROM unnest($1::int4[]) AS t(tag_id)
+                  CROSS JOIN LATERAL (
+                      SELECT ts, tag_id, value, quality
+                      FROM samples
+                      WHERE samples.tag_id = t.tag_id AND ts <= $2 AND ts >= $3
+                      ORDER BY ts DESC
+                      LIMIT 1
+                  ) s
+                  """
+                : """
+                  SELECT s.ts, s.tag_id, s.value, s.quality
+                  FROM unnest($1::int4[]) AS t(tag_id)
+                  CROSS JOIN LATERAL (
+                      SELECT ts, tag_id, value, quality
+                      FROM samples
+                      WHERE samples.tag_id = t.tag_id AND ts <= $2
+                      ORDER BY ts DESC
+                      LIMIT 1
+                  ) s
+                  """, conn);
+        cmd.Parameters.Add(new NpgsqlParameter { Value = StoreUtil.IntTags(tagIds) });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = at.UtcDateTime });
+        if (bounded)
+        {
+            cmd.Parameters.Add(new NpgsqlParameter { Value = at.UtcDateTime.AddHours(-3) });
+        }
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await ScanSamples(reader, carried: false, ct);
     }
 
     public async Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)
@@ -184,6 +211,70 @@ public sealed class TimescaleStore : IStore
             output.Add(sample);
         }
 
+        return output;
+    }
+
+    private static List<uint> MissingTagIds(IReadOnlyList<uint> tagIds, IReadOnlyList<Sample> rows)
+    {
+        var found = new HashSet<uint>(rows.Select(s => s.TagId));
+        var missing = new List<uint>();
+        var seen = new HashSet<uint>();
+        foreach (var id in tagIds)
+        {
+            if (!seen.Add(id))
+            {
+                continue;
+            }
+
+            if (!found.Contains(id))
+            {
+                missing.Add(id);
+            }
+        }
+
+        return missing;
+    }
+
+    private static List<Sample> MergeRange(IReadOnlyList<uint> tagIds, IReadOnlyList<Sample> head, IReadOnlyList<Sample> tail)
+    {
+        var buckets = new Dictionary<uint, List<Sample>>(tagIds.Count);
+        foreach (var id in tagIds)
+        {
+            buckets.TryAdd(id, []);
+        }
+
+        foreach (var sample in head)
+        {
+            sample.Carried = true;
+            if (!buckets.TryGetValue(sample.TagId, out var bucket))
+            {
+                bucket = [];
+                buckets[sample.TagId] = bucket;
+            }
+
+            bucket.Add(sample);
+        }
+
+        var extra = new List<Sample>();
+        foreach (var sample in tail)
+        {
+            if (buckets.TryGetValue(sample.TagId, out var bucket))
+            {
+                bucket.Add(sample);
+            }
+            else
+            {
+                extra.Add(sample);
+            }
+        }
+
+        var output = new List<Sample>(head.Count + tail.Count);
+        foreach (var id in tagIds)
+        {
+            output.AddRange(buckets[id]);
+        }
+
+        output.AddRange(extra);
         return output;
     }
 

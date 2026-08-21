@@ -1,7 +1,6 @@
 package model
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -24,50 +23,31 @@ type Sample struct {
 }
 
 type WriteItem struct {
-	Date    time.Time
-	ID      uint32
-	Value   float64
-	Quality *uint16
-}
-
-func (w *WriteItem) UnmarshalJSON(b []byte) error {
-	var raw struct {
-		Date    *time.Time `json:"date"`
-		TS      *time.Time `json:"ts"`
-		ID      uint32     `json:"id"`
-		TagID   uint32     `json:"tag_id"`
-		Value   float64    `json:"value"`
-		Quality *uint16    `json:"quality"`
-	}
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	switch {
-	case raw.Date != nil && !raw.Date.IsZero():
-		w.Date = *raw.Date
-	case raw.TS != nil && !raw.TS.IsZero():
-		w.Date = *raw.TS
-	}
-	if raw.ID != 0 {
-		w.ID = raw.ID
-	} else {
-		w.ID = raw.TagID
-	}
-	w.Value = raw.Value
-	w.Quality = raw.Quality
-	return nil
+	Date    time.Time `json:"date"`
+	TS      time.Time `json:"ts"`
+	ID      uint32    `json:"id"`
+	TagID   uint32    `json:"tag_id"`
+	Value   float64   `json:"value"`
+	Quality *uint16   `json:"quality"`
 }
 
 func (w WriteItem) Normalize(now time.Time) Sample {
 	ts := w.Date
 	if ts.IsZero() {
+		ts = w.TS
+	}
+	if ts.IsZero() {
 		ts = now
+	}
+	id := w.ID
+	if id == 0 {
+		id = w.TagID
 	}
 	q := QualityGood
 	if w.Quality != nil {
 		q = *w.Quality
 	}
-	return Sample{TS: ts.UTC(), TagID: w.ID, Value: w.Value, Quality: q}
+	return Sample{TS: ts.UTC(), TagID: id, Value: w.Value, Quality: q}
 }
 
 type SamplesWrap struct {

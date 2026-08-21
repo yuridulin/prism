@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fmt::Write as _;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{FromRow, PgPool};
@@ -18,15 +22,6 @@ struct SampleRow {
 }
 
 #[derive(FromRow)]
-struct SampleRowCarried {
-    ts: DateTime<Utc>,
-    tag_id: i32,
-    value: f32,
-    quality: i16,
-    carried: bool,
-}
-
-#[derive(FromRow)]
 struct TagRow {
     id: i32,
     name: String,
@@ -42,6 +37,50 @@ impl Timescale {
             .map_err(StoreError::from)?;
         Ok(Self { pool })
     }
+
+    async fn locf_query(&self, tag_ids: &[u32], at: DateTime<Utc>, bounded: bool) -> Result<Vec<Sample>> {
+        let ids: Vec<i32> = tag_ids.iter().map(|&id| id as i32).collect();
+        let rows = if bounded {
+            let since = at - chrono::Duration::hours(3);
+            sqlx::query_as::<_, SampleRow>(
+                r#"
+                SELECT s.ts, s.tag_id, s.value, s.quality
+                FROM unnest($1::int4[]) AS t(tag_id)
+                CROSS JOIN LATERAL (
+                    SELECT ts, tag_id, value, quality
+                    FROM samples
+                    WHERE samples.tag_id = t.tag_id AND ts <= $2 AND ts >= $3
+                    ORDER BY ts DESC
+                    LIMIT 1
+                ) s
+                "#,
+            )
+            .bind(&ids)
+            .bind(at)
+            .bind(since)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, SampleRow>(
+                r#"
+                SELECT s.ts, s.tag_id, s.value, s.quality
+                FROM unnest($1::int4[]) AS t(tag_id)
+                CROSS JOIN LATERAL (
+                    SELECT ts, tag_id, value, quality
+                    FROM samples
+                    WHERE samples.tag_id = t.tag_id AND ts <= $2
+                    ORDER BY ts DESC
+                    LIMIT 1
+                ) s
+                "#,
+            )
+            .bind(&ids)
+            .bind(at)
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(rows.into_iter().map(|r| to_sample(r, false)).collect())
+    }
 }
 
 fn to_sample(row: SampleRow, carried: bool) -> Sample {
@@ -52,6 +91,32 @@ fn to_sample(row: SampleRow, carried: bool) -> Sample {
         quality: row.quality as u16,
         carried,
     }
+}
+
+fn merge_range(tag_ids: &[u32], head: Vec<Sample>, tail: Vec<Sample>) -> Vec<Sample> {
+    let mut buckets: HashMap<u32, Vec<Sample>> = HashMap::new();
+    for id in tag_ids {
+        buckets.entry(*id).or_default();
+    }
+    for sample in head {
+        buckets.entry(sample.tag_id).or_default().push(sample);
+    }
+    let mut extra = Vec::new();
+    for sample in tail {
+        if let Some(bucket) = buckets.get_mut(&sample.tag_id) {
+            bucket.push(sample);
+        } else {
+            extra.push(sample);
+        }
+    }
+    let mut out = Vec::new();
+    for id in tag_ids {
+        if let Some(bucket) = buckets.get_mut(id) {
+            out.append(bucket);
+        }
+    }
+    out.extend(extra);
+    out
 }
 
 #[async_trait]
@@ -69,72 +134,47 @@ impl Store for Timescale {
         if samples.is_empty() {
             return Ok(());
         }
-        let mut ts = Vec::with_capacity(samples.len());
-        let mut tag_ids = Vec::with_capacity(samples.len());
-        let mut values = Vec::with_capacity(samples.len());
-        let mut qualities = Vec::with_capacity(samples.len());
+        let mut conn = self.pool.acquire().await?;
+        let mut copy = conn
+            .copy_in_raw("COPY samples (ts, tag_id, value, quality) FROM STDIN")
+            .await?;
+        let mut buf = String::with_capacity(samples.len() * 48);
         for s in samples {
-            ts.push(s.ts);
-            tag_ids.push(s.tag_id as i32);
-            values.push(s.value as f32);
-            qualities.push(s.quality as i16);
+            let _ = write!(
+                buf,
+                "{}\t{}\t{}\t{}\n",
+                s.ts.format("%Y-%m-%d %H:%M:%S%.6f+00"),
+                s.tag_id as i32,
+                s.value as f32,
+                s.quality as i16
+            );
         }
-        sqlx::query(
-            r#"
-            INSERT INTO samples (ts, tag_id, value, quality)
-            SELECT * FROM UNNEST($1::timestamptz[], $2::int4[], $3::float4[], $4::int2[])
-            "#,
-        )
-        .bind(&ts)
-        .bind(&tag_ids)
-        .bind(&values)
-        .bind(&qualities)
-        .execute(&self.pool)
-        .await?;
+        copy.send(buf.as_bytes()).await?;
+        copy.finish().await?;
         Ok(())
     }
 
     async fn locf(&self, tag_ids: &[u32], at: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let ids: Vec<i32> = tag_ids.iter().map(|&id| id as i32).collect();
-        let rows = sqlx::query_as::<_, SampleRow>(
-            r#"
-            SELECT s.ts, s.tag_id, s.value, s.quality
-            FROM unnest($1::int4[]) AS t(tag_id)
-            CROSS JOIN LATERAL (
-                SELECT ts, tag_id, value, quality
-                FROM samples
-                WHERE samples.tag_id = t.tag_id AND ts <= $2
-                ORDER BY ts DESC
-                LIMIT 1
-            ) s
-            "#,
-        )
-        .bind(&ids)
-        .bind(at)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows.into_iter().map(|r| to_sample(r, false)).collect())
+        let mut out = self.locf_query(tag_ids, at, true).await?;
+        let found: HashSet<u32> = out.iter().map(|s| s.tag_id).collect();
+        let missing: Vec<u32> = tag_ids.iter().copied().filter(|id| !found.contains(id)).collect();
+        if !missing.is_empty() {
+            out.extend(self.locf_query(&missing, at, false).await?);
+        }
+        Ok(out)
     }
 
     async fn range(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
+        let mut head = self.locf(tag_ids, from).await?;
+        for sample in &mut head {
+            sample.carried = true;
+        }
         let ids: Vec<i32> = tag_ids.iter().map(|&id| id as i32).collect();
-        let rows = sqlx::query_as::<_, SampleRowCarried>(
+        let rows = sqlx::query_as::<_, SampleRow>(
             r#"
-            SELECT ts, tag_id, value, quality, carried FROM (
-                SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
-                FROM unnest($1::int4[]) AS t(tag_id)
-                CROSS JOIN LATERAL (
-                    SELECT ts, tag_id, value, quality
-                    FROM samples
-                    WHERE samples.tag_id = t.tag_id AND ts <= $2
-                    ORDER BY ts DESC
-                    LIMIT 1
-                ) s
-                UNION ALL
-                SELECT ts, tag_id, value, quality, false
-                FROM samples
-                WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-            ) q
+            SELECT ts, tag_id, value, quality
+            FROM samples
+            WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
             ORDER BY tag_id, ts
             "#,
         )
@@ -143,16 +183,8 @@ impl Store for Timescale {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows
-            .into_iter()
-            .map(|r| Sample {
-                ts: r.ts,
-                tag_id: r.tag_id as u32,
-                value: r.value as f64,
-                quality: r.quality as u16,
-                carried: r.carried,
-            })
-            .collect())
+        let tail = rows.into_iter().map(|r| to_sample(r, false)).collect();
+        Ok(merge_range(tag_ids, head, tail))
     }
 
     async fn upsert_tags(&self, tags: &[Tag]) -> Result<()> {

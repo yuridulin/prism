@@ -37,16 +37,43 @@ impl Influx {
         }
     }
 
-    async fn query_flux(&self, flux: &str, carried: bool) -> Result<Vec<Sample>> {
-        let mut u = Url::parse(&format!("{}/api/v2/query", self.base))?;
-        u.query_pairs_mut().append_pair("org", &self.org);
+    async fn query_last(
+        &self,
+        tag_ids: &[u32],
+        stop: DateTime<Utc>,
+        carried: bool,
+    ) -> Result<Vec<Sample>> {
+        let q = format!(
+            r#"SELECT last("value") AS "value", last("quality") AS "quality" FROM "samples" WHERE time <= {stop} AND {filter} GROUP BY "tag_id""#,
+            stop = influxql_time(stop),
+            filter = influxql_tag_re(tag_ids),
+        );
+        self.query_influxql(&q, carried).await
+    }
+
+    async fn query_window(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
+        let q = format!(
+            r#"SELECT "value", "quality" FROM "samples" WHERE time > {start} AND time <= {stop} AND {filter}"#,
+            start = influxql_time(from),
+            stop = influxql_time(to),
+            filter = influxql_tag_re(tag_ids),
+        );
+        self.query_influxql(&q, false).await
+    }
+
+    async fn query_influxql(&self, q: &str, carried: bool) -> Result<Vec<Sample>> {
         let resp = self
             .client
-            .post(u)
+            .post(format!("{}/query", self.base))
             .header("Authorization", self.auth.as_str())
-            .header("Content-Type", "application/vnd.flux")
             .header("Accept", "application/csv")
-            .body(flux.to_string())
+            .form(&[
+                ("org", self.org.as_str()),
+                ("bucket", self.bucket.as_str()),
+                ("db", self.bucket.as_str()),
+                ("epoch", "ms"),
+                ("q", q),
+            ])
             .send()
             .await?;
         let status = resp.status();
@@ -54,63 +81,211 @@ impl Influx {
         if status.as_u16() >= 300 {
             return Err(StoreError::new(format!("influx query {status}: {text}")));
         }
-        parse_flux_csv(&text, carried)
+        parse_influx_body(&text, carried)
     }
 
-    async fn query_last(
-        &self,
-        tag_ids: &[u32],
-        stop: DateTime<Utc>,
-        carried: bool,
-    ) -> Result<Vec<Sample>> {
-        // Archive max gap is 1h; 3h still finds the previous minute/hour point at 364d ago.
-        let start = stop - chrono::Duration::hours(3);
-        let stop_excl = stop + chrono::Duration::nanoseconds(1);
-        let flux = format!(
-            r#"
-from(bucket: {bucket:?})
-  |> range(start: {start}, stop: {stop})
-  |> filter(fn: (r) => r._measurement == "samples")
-  |> filter(fn: (r) => {filter})
-  |> last()
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-"#,
-            bucket = self.bucket,
-            start = start.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-            stop = stop_excl.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-            filter = influx_tag_filter(tag_ids),
-        );
-        self.query_flux(&flux, carried).await
-    }
-
-    async fn query_window(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let start = from + chrono::Duration::nanoseconds(1);
-        let stop = to + chrono::Duration::nanoseconds(1);
-        let flux = format!(
-            r#"
-from(bucket: {bucket:?})
-  |> range(start: {start}, stop: {stop})
-  |> filter(fn: (r) => r._measurement == "samples")
-  |> filter(fn: (r) => {filter})
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-"#,
-            bucket = self.bucket,
-            start = start.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-            stop = stop.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-            filter = influx_tag_filter(tag_ids),
-        );
-        self.query_flux(&flux, false).await
+    async fn ensure_dbrp(&self) -> Result<()> {
+        let listed = self
+            .client
+            .get(format!("{}/api/v2/dbrps", self.base))
+            .header("Authorization", self.auth.as_str())
+            .query(&[("org", self.org.as_str()), ("db", self.bucket.as_str())])
+            .send()
+            .await?;
+        if listed.status().as_u16() < 300 {
+            let v: serde_json::Value = listed.json().await.unwrap_or(serde_json::Value::Null);
+            if v.get("content").and_then(|c| c.as_array()).map(|a| !a.is_empty()).unwrap_or(false) {
+                return Ok(());
+            }
+        }
+        let buckets = self
+            .client
+            .get(format!("{}/api/v2/buckets", self.base))
+            .header("Authorization", self.auth.as_str())
+            .query(&[("org", self.org.as_str()), ("name", self.bucket.as_str())])
+            .send()
+            .await?;
+        let status = buckets.status();
+        let text = buckets.text().await.unwrap_or_default();
+        if status.as_u16() >= 300 {
+            return Err(StoreError::new(format!("influx buckets {status}: {text}")));
+        }
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(StoreError::new)?;
+        let id = v
+            .pointer("/buckets/0/id")
+            .and_then(|x| x.as_str())
+            .ok_or_else(|| StoreError::new("influx bucket not found"))?;
+        let body = serde_json::json!({
+            "org": self.org,
+            "bucketID": id,
+            "database": self.bucket,
+            "retention_policy": "autogen",
+            "default": true
+        });
+        let created = self
+            .client
+            .post(format!("{}/api/v2/dbrps", self.base))
+            .header("Authorization", self.auth.as_str())
+            .query(&[("org", self.org.as_str())])
+            .json(&body)
+            .send()
+            .await?;
+        let status = created.status();
+        if status.as_u16() >= 300 && status.as_u16() != 409 {
+            let text = created.text().await.unwrap_or_default();
+            return Err(StoreError::new(format!("influx dbrp {status}: {text}")));
+        }
+        Ok(())
     }
 }
 
-fn influx_tag_filter(ids: &[u32]) -> String {
+fn influxql_time(t: DateTime<Utc>) -> String {
+    format!("'{}'", t.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+}
+
+fn influxql_tag_re(ids: &[u32]) -> String {
     if ids.is_empty() {
         return "true".to_string();
     }
-    ids.iter()
-        .map(|id| format!(r#"r.tag_id == "{id}""#))
-        .collect::<Vec<_>>()
-        .join(" or ")
+    let parts: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+    format!("tag_id =~ /^({})$/", parts.join("|"))
+}
+
+fn parse_influx_body(text: &str, carried: bool) -> Result<Vec<Sample>> {
+    let trimmed = text.trim_start();
+    if trimmed.is_empty() || !trimmed.starts_with('{') {
+        return Ok(parse_influx_csv(text, carried));
+    }
+    parse_influxql(text, carried)
+}
+
+fn parse_influx_csv(text: &str, carried: bool) -> Vec<Sample> {
+    let mut lines = text.lines();
+    let mut idx: Option<Vec<String>> = None;
+    let mut out = Vec::new();
+    for line in lines.by_ref() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let cols: Vec<&str> = line.split(',').collect();
+        if idx.is_none() {
+            let names: Vec<String> = cols.iter().map(|c| c.trim().trim_matches('"').to_ascii_lowercase()).collect();
+            if names.iter().any(|n| n == "time") {
+                idx = Some(names);
+            }
+            continue;
+        }
+        let names = idx.as_ref().unwrap();
+        let pos = |name: &str| names.iter().position(|n| n == name);
+        let (Some(ti), Some(vi)) = (pos("time"), pos("value")) else {
+            continue;
+        };
+        if ti >= cols.len() || vi >= cols.len() {
+            continue;
+        }
+        let tag_id = if let Some(i) = pos("tag_id") {
+            cols.get(i).and_then(|s| s.trim_matches('"').parse().ok()).unwrap_or(0)
+        } else if let Some(i) = pos("tags") {
+            tag_id_from_influx_tags(cols.get(i).copied().unwrap_or(""))
+        } else {
+            0
+        };
+        let quality = pos("quality")
+            .and_then(|i| cols.get(i))
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0) as u16;
+        let ts_raw = cols[ti].trim_matches('"');
+        let ts = if let Ok(ms) = ts_raw.parse::<i64>() {
+            DateTime::from_timestamp_millis(ms).unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap())
+        } else {
+            DateTime::parse_from_rfc3339(ts_raw)
+                .map(|t| t.with_timezone(&Utc))
+                .unwrap_or_else(|_| DateTime::from_timestamp(0, 0).unwrap())
+        };
+        let value = cols[vi].parse().unwrap_or(0.0);
+        out.push(Sample {
+            ts,
+            tag_id,
+            value,
+            quality,
+            carried,
+        });
+    }
+    out
+}
+
+fn tag_id_from_influx_tags(s: &str) -> u32 {
+    let s = s.trim_matches('"');
+    for part in s.split(',') {
+        if let Some((k, v)) = part.split_once('=') {
+            if k.trim() == "tag_id" {
+                return v.trim().parse().unwrap_or(0);
+            }
+        }
+    }
+    0
+}
+
+fn parse_influxql(text: &str, carried: bool) -> Result<Vec<Sample>> {
+    let v: serde_json::Value = serde_json::from_str(text).map_err(StoreError::new)?;
+    let mut out = Vec::new();
+    let Some(results) = v.get("results").and_then(|r| r.as_array()) else {
+        return Ok(out);
+    };
+    for result in results {
+        if let Some(err) = result.get("error").and_then(|e| e.as_str()) {
+            return Err(StoreError::new(format!("influxql: {err}")));
+        }
+        let Some(series) = result.get("series").and_then(|s| s.as_array()) else {
+            continue;
+        };
+        for item in series {
+            let tag_id = item
+                .pointer("/tags/tag_id")
+                .and_then(|x| x.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let cols: Vec<String> = item
+                .get("columns")
+                .and_then(|c| c.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            let col = |name: &str| cols.iter().position(|c| c == name);
+            let (Some(ti), Some(vi)) = (col("time"), col("value")) else {
+                continue;
+            };
+            let qi = col("quality");
+            let Some(values) = item.get("values").and_then(|x| x.as_array()) else {
+                continue;
+            };
+            for row in values {
+                let Some(cells) = row.as_array() else {
+                    continue;
+                };
+                if ti >= cells.len() || vi >= cells.len() {
+                    continue;
+                }
+                let ts = cells[ti]
+                    .as_i64()
+                    .or_else(|| cells[ti].as_f64().map(|f| f as i64))
+                    .unwrap_or(0);
+                let value = cells[vi].as_f64().unwrap_or(0.0);
+                let quality = qi
+                    .and_then(|i| cells.get(i))
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.0) as u16;
+                out.push(Sample {
+                    ts: DateTime::from_timestamp_millis(ts).unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap()),
+                    tag_id,
+                    value,
+                    quality,
+                    carried,
+                });
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn append_ilp_line(buf: &mut String, p: &Sample) {
@@ -124,55 +299,6 @@ fn append_ilp_line(buf: &mut String, p: &Sample) {
     );
 }
 
-fn parse_flux_csv(text: &str, carried: bool) -> Result<Vec<Sample>> {
-    let mut headers: Vec<String> = Vec::new();
-    let mut out = Vec::new();
-    for line in text.lines() {
-        if line.is_empty() {
-            headers.clear();
-            continue;
-        }
-        if line.starts_with('#') {
-            continue;
-        }
-        let cols: Vec<&str> = line.split(',').collect();
-        if headers.is_empty() {
-            headers = cols.iter().map(|s| (*s).to_string()).collect();
-            continue;
-        }
-        let get = |name: &str| -> Option<&str> {
-            headers
-                .iter()
-                .position(|h| h == name)
-                .and_then(|i| cols.get(i).copied())
-                .filter(|s| !s.is_empty())
-        };
-        let Some(ts_raw) = get("_time") else {
-            continue;
-        };
-        let Some(id_raw) = get("tag_id") else {
-            continue;
-        };
-        let Some(val_raw) = get("value") else {
-            continue;
-        };
-        let ts = DateTime::parse_from_rfc3339(ts_raw)
-            .map_err(|e| StoreError::new(format!("influx ts: {e}")))?
-            .with_timezone(&Utc);
-        let tag_id: u32 = id_raw.parse().unwrap_or(0);
-        let value: f64 = val_raw.parse().unwrap_or(0.0);
-        let quality: u16 = get("quality").and_then(|s| s.parse().ok()).unwrap_or(0);
-        out.push(Sample {
-            ts,
-            tag_id,
-            value,
-            quality,
-            carried,
-        });
-    }
-    Ok(out)
-}
-
 #[async_trait]
 impl Store for Influx {
     fn name(&self) -> &'static str {
@@ -184,7 +310,7 @@ impl Store for Influx {
         if resp.status().as_u16() >= 300 {
             return Err(StoreError::new(format!("influxdb ping {}", resp.status())));
         }
-        Ok(())
+        self.ensure_dbrp().await
     }
 
     async fn write(&self, samples: &[Sample]) -> Result<()> {

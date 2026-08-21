@@ -3,11 +3,11 @@ package ingest
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"time"
 
+	json "github.com/goccy/go-json"
 	"github.com/nats-io/nats.go"
 
 	"prism/go-api/internal/metrics"

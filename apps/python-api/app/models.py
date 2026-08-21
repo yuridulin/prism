@@ -129,3 +129,36 @@ def parse_write_payload(payload: Any) -> list[WriteItem]:
             return SamplesWrap.model_validate(payload).samples
         return [WriteItem.model_validate(payload)]
     raise ValueError("values array is required")
+
+
+def samples_from_payload(payload: Any, now: datetime) -> list[Sample]:
+    if isinstance(payload, dict) and "samples" in payload:
+        payload = payload["samples"]
+    if not isinstance(payload, list) or not payload:
+        raise ValueError("values array is required")
+    out: list[Sample] = []
+    for raw in payload:
+        if not isinstance(raw, dict):
+            raise ValueError("values array is required")
+        tag = raw.get("id", raw.get("tag_id"))
+        if tag is None:
+            raise ValueError("id is required")
+        stamp = raw.get("date") or raw.get("ts") or now
+        if isinstance(stamp, str):
+            stamp = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        elif isinstance(stamp, datetime) and stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        q = QUALITY_GOOD if raw.get("quality") is None else int(raw["quality"])
+        try:
+            value = float(raw["value"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("value is required") from exc
+        out.append(
+            Sample.model_construct(
+                ts=stamp,
+                tag_id=int(tag),
+                value=value,
+                quality=q,
+            )
+        )
+    return out

@@ -2,11 +2,11 @@ package api
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"time"
 
+	json "github.com/goccy/go-json"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

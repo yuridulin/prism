@@ -3,7 +3,6 @@ use std::fmt::Write as _;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use serde::Deserialize;
 use url::Url;
 
 use super::{append_ilp_float, Catalog, Result, Store, StoreError};
@@ -14,13 +13,6 @@ pub struct VictoriaMetrics {
     write_url: String,
     client: reqwest::Client,
     tags: Catalog,
-}
-
-#[derive(Debug, Deserialize)]
-struct VmExportRow {
-    metric: HashMap<String, String>,
-    timestamps: Vec<i64>,
-    values: Vec<f64>,
 }
 
 impl VictoriaMetrics {
@@ -61,11 +53,12 @@ impl VictoriaMetrics {
         if tag_ids.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
-        let mut u = Url::parse(&format!("{}/api/v1/export", self.base))?;
+        let mut u = Url::parse(&format!("{}/api/v1/export/csv", self.base))?;
         u.query_pairs_mut()
             .append_pair("match[]", &format!(r#"prism_sample{{tag_id=~"{}"}}"#, Self::tag_re(tag_ids)))
             .append_pair("start", &export_start.timestamp().to_string())
-            .append_pair("end", &export_end.timestamp().to_string());
+            .append_pair("end", &export_end.timestamp().to_string())
+            .append_pair("format", "tag_id,quality,__value__,__timestamp__:unix_ms");
         let resp = self.client.get(u).send().await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
@@ -76,44 +69,54 @@ impl VictoriaMetrics {
         let mut best: HashMap<u32, Sample> = HashMap::new();
         let mut mid = Vec::new();
         for line in text.lines() {
-            if line.trim().is_empty() {
+            if line.trim().is_empty() || line.starts_with("tag_id") {
                 continue;
             }
-            let row: VmExportRow = serde_json::from_str(line)
-                .map_err(|e| StoreError::new(format!("vm export json: {e}")))?;
-            let Some(id) = row.metric.get("tag_id").and_then(|v| v.parse().ok()) else {
+            let mut parts = line.split(',');
+            let Some(id_raw) = parts.next() else {
                 continue;
             };
-            let q = quality_from(&row.metric);
-            for (i, ts) in row.timestamps.iter().enumerate() {
-                let t = DateTime::from_timestamp_millis(*ts)
-                    .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap());
-                let val = row.values.get(i).copied().unwrap_or(0.0);
-                if t <= from {
-                    let better = best.get(&id).map(|prev| t > prev.ts).unwrap_or(true);
-                    if better {
-                        best.insert(
-                            id,
-                            Sample {
-                                ts: t,
-                                tag_id: id,
-                                value: val,
-                                quality: q,
-                                carried: with_mid,
-                            },
-                        );
-                    }
-                    continue;
+            let Some(q_raw) = parts.next() else {
+                continue;
+            };
+            let Some(val_raw) = parts.next() else {
+                continue;
+            };
+            let Some(ts_raw) = parts.next() else {
+                continue;
+            };
+            let Ok(id) = id_raw.parse::<u32>() else {
+                continue;
+            };
+            let q: u16 = q_raw.parse().unwrap_or(0);
+            let val: f64 = val_raw.parse().unwrap_or(0.0);
+            let ms: i64 = ts_raw.parse().unwrap_or(0);
+            let t = DateTime::from_timestamp_millis(ms)
+                .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap());
+            if t <= from {
+                let better = best.get(&id).map(|prev| t > prev.ts).unwrap_or(true);
+                if better {
+                    best.insert(
+                        id,
+                        Sample {
+                            ts: t,
+                            tag_id: id,
+                            value: val,
+                            quality: q,
+                            carried: with_mid,
+                        },
+                    );
                 }
-                if with_mid && t <= to {
-                    mid.push(Sample {
-                        ts: t,
-                        tag_id: id,
-                        value: val,
-                        quality: q,
-                        carried: false,
-                    });
-                }
+                continue;
+            }
+            if with_mid && t <= to {
+                mid.push(Sample {
+                    ts: t,
+                    tag_id: id,
+                    value: val,
+                    quality: q,
+                    carried: false,
+                });
             }
         }
         let seed = tag_ids
@@ -122,13 +125,6 @@ impl VictoriaMetrics {
             .collect();
         Ok((seed, mid))
     }
-}
-
-fn quality_from(metric: &HashMap<String, String>) -> u16 {
-    metric
-        .get("quality")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0)
 }
 
 #[async_trait]

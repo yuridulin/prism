@@ -1,4 +1,6 @@
 import asyncio
+import csv
+import io
 import socket
 from datetime import datetime
 
@@ -12,6 +14,30 @@ def _qdb_time(ts: datetime) -> str:
 
 def _symbol_ids(tag_ids: list[int]) -> str:
     return ",".join(f"'{i}'" for i in tag_ids)
+
+
+def _parse_qdb_csv(text: str) -> list[Sample]:
+    reader = csv.reader(io.StringIO(text))
+    try:
+        header = next(reader)
+    except StopIteration:
+        return []
+    idx = {name.strip().lower(): i for i, name in enumerate(header)}
+    ts_i, tag_i, val_i, q_i = idx["ts"], idx["tag_id"], idx["value"], idx["quality"]
+    c_i = idx.get("carried")
+    out: list[Sample] = []
+    for row in reader:
+        if max(ts_i, tag_i, val_i, q_i) >= len(row):
+            continue
+        ts = row[ts_i]
+        stamp = datetime.fromisoformat(ts.replace("Z", "+00:00")) if isinstance(ts, str) else ts
+        sample = Sample.model_construct(
+            ts=stamp, tag_id=int(row[tag_i]), value=float(row[val_i]), quality=int(float(row[q_i]))
+        )
+        if c_i is not None and c_i < len(row):
+            sample.carried = str(row[c_i]).lower() in {"true", "t", "1"}
+        out.append(sample)
+    return out
 
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:
@@ -106,7 +132,7 @@ class QuestDBStore:
 
     async def range(self, tag_ids: list[int], start: datetime, end: datetime) -> list[Sample]:
         ids = _symbol_ids(tag_ids)
-        data = await self._exec(
+        return await self._exp(
             f"""
             SELECT ts, tag_id, value, quality, carried FROM (
               SELECT ts, tag_id, value, quality, true AS carried
@@ -120,7 +146,6 @@ class QuestDBStore:
             )
             """
         )
-        return self._samples(data, True)
 
     async def upsert_tags(self, tags: list[Tag]) -> None:
         for tag in tags:
@@ -143,6 +168,11 @@ class QuestDBStore:
         if data.get("error"):
             raise RuntimeError(data["error"])
         return data
+
+    async def _exp(self, query: str) -> list[Sample]:
+        resp = await self._http.get("/exp", params={"query": query})
+        raise_status(resp, "questdb exp")
+        return _parse_qdb_csv(resp.text)
 
     def _samples(self, data: dict, has_carried: bool) -> list[Sample]:
         out: list[Sample] = []

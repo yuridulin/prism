@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use metrics_exporter_prometheus::PrometheusHandle;

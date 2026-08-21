@@ -1,0 +1,76 @@
+backend: go
+storage: influxdb
+status: completed
+when:
+  started_at: '2026-08-21T11:51:22Z'
+  finished_at: '2026-08-21T11:56:59Z'
+services:
+- nats
+- influxdb
+- go-api
+- prometheus
+reuse_volumes: false
+generator:
+  profile: query-mix
+  written: 4835600
+  queries: 1632
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 326.8
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 26.8
+  query_elapsed_seconds: 300.0
+meta:
+  backend: go
+  storage: influxdb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: go
+  storage: influxdb
+  ingest_rate: 0.0
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.4158854166666671
+  range_p95_seconds: 10.0
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.4158854166666671
+  storage_range_p95_seconds: 10.0
+  api_p95_seconds: 5.835365853658542
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 100.1MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 5.828MiB
+  - name: prism-influxdb-1
+    cpu: 1.50%
+    mem: 911.3MiB
+  - name: prism-prometheus-1
+    cpu: 0.27%
+    mem: 42.47MiB
+  api:
+    cpu: 0.00%
+    mem: 100.1MiB
+  storage:
+    cpu: 1.50%
+    mem: 911.3MiB
+storage_size:
+  bytes: 100776324
+  mib: 96.1
+  volume: prism_influx_data
+  path: /var/lib/influxdb2

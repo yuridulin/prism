@@ -1,0 +1,80 @@
+backend: rust
+storage: timescaledb
+status: completed
+when:
+  started_at: '2026-08-21T11:24:11Z'
+  finished_at: '2026-08-21T11:27:24Z'
+services:
+- nats
+- timescaledb
+- rust-api
+- prometheus
+- postgres-exporter
+reuse_volumes: false
+generator:
+  profile: write-ceiling
+  written: 19355750
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 107530.2
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: rust
+  storage: timescaledb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: rust
+  storage: timescaledb
+  ingest_rate: 107530.59895089312
+  write_error_rate: null
+  write_p95_seconds: 0.008468283582089562
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.008466648879402357
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.013695018796992472
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 11MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 28.18MiB
+  - name: prism-timescaledb-1
+    cpu: 1.69%
+    mem: 387.1MiB
+  - name: prism-prometheus-1
+    cpu: 0.20%
+    mem: 41.88MiB
+  - name: prism-nats-1
+    cpu: 0.03%
+    mem: 8.312MiB
+  api:
+    cpu: 0.00%
+    mem: 11MiB
+  storage:
+    cpu: 1.69%
+    mem: 387.1MiB
+storage_size:
+  bytes: 2132914160
+  mib: 2034.1
+  volume: prism_timescale_data
+  path: /var/lib/postgresql/data

@@ -1,4 +1,5 @@
-import json
+import csv
+import io
 from datetime import datetime, timedelta
 
 from app.models import Sample, Tag
@@ -68,37 +69,37 @@ class VictoriaMetricsStore:
         if not tag_ids:
             return [], []
         resp = await _http().get(
-            f"{self._url}/api/v1/export",
+            f"{self._url}/api/v1/export/csv",
             params={
                 "match[]": f'prism_sample{{tag_id=~"{_tag_re(tag_ids)}"}}',
                 "start": int(export_start.timestamp()),
                 "end": int(export_end.timestamp()),
+                "format": "tag_id,quality,__value__,__timestamp__:unix_ms",
             },
         )
         raise_status(resp, "vm export")
         best: dict[int, Sample] = {}
         mid: list[Sample] = []
-        for line in resp.text.splitlines():
-            if not line.strip():
+        reader = csv.reader(io.StringIO(resp.text))
+        for row in reader:
+            if len(row) < 4 or row[0] == "tag_id":
                 continue
-            row = json.loads(line)
-            metric = row.get("metric") or {}
             try:
-                tag_id = int(metric.get("tag_id"))
-            except (TypeError, ValueError):
+                tag_id = int(row[0])
+            except ValueError:
                 continue
-            quality = int(metric.get("quality") or 0)
-            for ts, val in zip(row.get("timestamps") or [], row.get("values") or []):
-                when = datetime.fromtimestamp(ts / 1000, tz=from_.tzinfo)
-                if when <= from_:
-                    prev = best.get(tag_id)
-                    if prev is None or when > prev.ts:
-                        best[tag_id] = Sample(
-                            ts=when, tag_id=tag_id, value=float(val), quality=quality, carried=with_mid
-                        )
-                    continue
-                if with_mid and when <= to:
-                    mid.append(Sample(ts=when, tag_id=tag_id, value=float(val), quality=quality))
+            quality = int(float(row[1] or 0))
+            val = float(row[2] or 0)
+            when = datetime.fromtimestamp(int(row[3]) / 1000, tz=from_.tzinfo)
+            if when <= from_:
+                prev = best.get(tag_id)
+                if prev is None or when > prev.ts:
+                    best[tag_id] = Sample(
+                        ts=when, tag_id=tag_id, value=val, quality=quality, carried=with_mid
+                    )
+                continue
+            if with_mid and when <= to:
+                mid.append(Sample(ts=when, tag_id=tag_id, value=val, quality=quality))
         seed = [best[tag_id] for tag_id in tag_ids if tag_id in best]
         return seed, mid
 

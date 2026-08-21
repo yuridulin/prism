@@ -8,6 +8,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-prism}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prism}
       POSTGRES_DB: ${POSTGRES_DB:-prism}
+      TS_TUNE_MEMORY: 1GB
+      TS_TUNE_NUM_CPUS: "1"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -34,6 +36,7 @@ services:
       - clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./infra/clickhouse/config.d/prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
+      - ./infra/clickhouse/users.d/prism.xml:/etc/clickhouse-server/users.d/prism.xml:ro
     healthcheck:
       test: ["CMD", "clickhouse-client", "--user", "${CLICKHOUSE_USER:-prism}", "--password", "${CLICKHOUSE_PASSWORD:-prism}", "--query", "SELECT 1"]
       interval: 5s
@@ -50,6 +53,7 @@ services:
     restart: unless-stopped
     environment:
       QDB_METRICS_ENABLED: "true"
+      QDB_SHARED_WORKER_COUNT: "2"
     ports:
       - "${QUESTDB_HTTP_PORT:-9001}:9000"
       - "${QUESTDB_PG_PORT:-8812}:8812"
@@ -70,6 +74,8 @@ services:
       DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-prism}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:-prism-dev-token}
       DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUX_RETENTION:-400d}
+      INFLUXD_STORAGE_CACHE_MAX_MEMORY_SIZE: "268435456"
+      INFLUXD_QUERY_CONCURRENCY: "8"
     ports:
       - "${INFLUX_PORT:-8086}:8086"
     volumes:
@@ -88,6 +94,7 @@ services:
       - "--storageDataPath=/victoria-metrics-data"
       - "--httpListenAddr=:8428"
       - "--retentionPeriod=400d"
+      - "--memory.allowedBytes=805306368"
     ports:
       - "${VM_PORT:-8428}:8428"
     volumes:

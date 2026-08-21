@@ -1,7 +1,5 @@
 using System.Globalization;
 using System.Net.Http.Headers;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Prism.Api.Models;
 
 namespace Prism.Api.Store;
@@ -88,8 +86,9 @@ public sealed class VictoriaMetricsStore : IStore
         var qs =
             $"match[]={Uri.EscapeDataString($"prism_sample{{tag_id=~\"{string.Join('|', tagIds)}\"}}")}" +
             $"&start={exportStart.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}" +
-            $"&end={exportEnd.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}";
-        using var resp = await _http.GetAsync(_base + "/api/v1/export?" + qs, ct);
+            $"&end={exportEnd.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}" +
+            "&format=" + Uri.EscapeDataString("tag_id,quality,__value__,__timestamp__:unix_ms");
+        using var resp = await _http.GetAsync(_base + "/api/v1/export/csv?" + qs, ct);
         await StoreUtil.EnsureSuccess(resp, "vm export", ct);
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var doc = new StreamReader(stream);
@@ -98,53 +97,55 @@ public sealed class VictoriaMetricsStore : IStore
         var mid = new List<Sample>();
         while (await doc.ReadLineAsync(ct) is { } line)
         {
-            if (string.IsNullOrWhiteSpace(line))
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith("tag_id", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            var row = JsonSerializer.Deserialize<VmExportRow>(line, JsonOpts);
-            if (row is null || !row.Metric.TryGetValue("tag_id", out var idRaw) || !uint.TryParse(idRaw, out var id))
+            var parts = line.Split(',');
+            if (parts.Length < 4 || !uint.TryParse(parts[0], out var id))
             {
                 continue;
             }
 
             ushort quality = 0;
-            if (row.Metric.TryGetValue("quality", out var qRaw) && int.TryParse(qRaw, out var q))
+            if (int.TryParse(parts[1], out var q))
             {
                 quality = (ushort)q;
             }
 
-            for (var i = 0; i < row.Timestamps.Count; i++)
+            double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var val);
+            if (!long.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms))
             {
-                var t = DateTimeOffset.FromUnixTimeMilliseconds(row.Timestamps[i]);
-                var val = i < row.Values.Count ? row.Values[i] : 0;
-                if (t <= from)
-                {
-                    if (!best.TryGetValue(id, out var prev) || t > prev.Ts)
-                    {
-                        best[id] = new Sample
-                        {
-                            Ts = t,
-                            TagId = id,
-                            Value = val,
-                            Quality = quality,
-                            Carried = withMid
-                        };
-                    }
-                    continue;
-                }
+                continue;
+            }
 
-                if (withMid && t <= to)
+            var t = DateTimeOffset.FromUnixTimeMilliseconds(ms);
+            if (t <= from)
+            {
+                if (!best.TryGetValue(id, out var prev) || t > prev.Ts)
                 {
-                    mid.Add(new Sample
+                    best[id] = new Sample
                     {
                         Ts = t,
                         TagId = id,
                         Value = val,
-                        Quality = quality
-                    });
+                        Quality = quality,
+                        Carried = withMid
+                    };
                 }
+                continue;
+            }
+
+            if (withMid && t <= to)
+            {
+                mid.Add(new Sample
+                {
+                    Ts = t,
+                    TagId = id,
+                    Value = val,
+                    Quality = quality
+                });
             }
         }
 
@@ -179,22 +180,5 @@ public sealed class VictoriaMetricsStore : IStore
     {
         _http.Dispose();
         return ValueTask.CompletedTask;
-    }
-
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
-    private sealed class VmExportRow
-    {
-        [JsonPropertyName("metric")]
-        public Dictionary<string, string> Metric { get; set; } = [];
-
-        [JsonPropertyName("timestamps")]
-        public List<long> Timestamps { get; set; } = [];
-
-        [JsonPropertyName("values")]
-        public List<double> Values { get; set; } = [];
     }
 }

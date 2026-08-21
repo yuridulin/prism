@@ -1,12 +1,12 @@
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 
 import nats
+import orjson
 
 from app.metrics import observe_backend, track
-from app.models import parse_write_payload
+from app.models import samples_from_payload
 from app.store.base import Store
 
 log = logging.getLogger("prism.nats")
@@ -27,12 +27,11 @@ async def run_consumer(url: str, subject: str, store: Store) -> None:
 
     async def handler(msg) -> None:
         try:
-            payload = json.loads(msg.data.decode())
-            items = parse_write_payload(payload)
-            if not items:
-                return
+            payload = orjson.loads(msg.data)
             now = datetime.now(timezone.utc)
-            samples = [item.to_sample(now) for item in items]
+            samples = samples_from_payload(payload, now)
+            if not samples:
+                return
             with track() as elapsed:
                 try:
                     await store.write(samples)

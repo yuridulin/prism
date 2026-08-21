@@ -1,0 +1,76 @@
+backend: python
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-21T10:58:06Z'
+  finished_at: '2026-08-21T11:01:15Z'
+services:
+- nats
+- victoriametrics
+- python-api
+- prometheus
+reuse_volumes: false
+generator:
+  profile: write-ceiling
+  written: 11843500
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 65796.2
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: python
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: python
+  storage: victoriametrics
+  ingest_rate: 65767.3693052278
+  write_error_rate: null
+  write_p95_seconds: 0.027012259010896923
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.02690578947368423
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.04495183938725775
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-python-api-1
+    cpu: 0.11%
+    mem: 47.59MiB
+  - name: prism-nats-1
+    cpu: 0.04%
+    mem: 7.91MiB
+  - name: prism-prometheus-1
+    cpu: 0.16%
+    mem: 33.69MiB
+  - name: prism-victoriametrics-1
+    cpu: 1.53%
+    mem: 100.5MiB
+  api:
+    cpu: 0.11%
+    mem: 47.59MiB
+  storage:
+    cpu: 1.53%
+    mem: 100.5MiB
+storage_size:
+  bytes: 36150701
+  mib: 34.5
+  volume: prism_vm_data
+  path: /victoria-metrics-data

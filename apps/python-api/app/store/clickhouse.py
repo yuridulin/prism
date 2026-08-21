@@ -31,16 +31,12 @@ def _ids(tag_ids: list[int]) -> str:
 
 def _locf_sql(ids: str, at: str, bounded: bool) -> str:
     at_dt = f"toDateTime64('{at}', 3, 'UTC')"
-    lower = f" AND t.ts >= {at_dt} - INTERVAL 2 DAY" if bounded else ""
+    lower = f" AND s.ts >= {at_dt} - INTERVAL 3 HOUR" if bounded else ""
     return f"""
-        SELECT toUnixTimestamp64Milli(s.ts), s.tag_id, s.value, s.quality
+        SELECT toUnixTimestamp64Milli(max(s.ts)), s.tag_id, argMax(s.value, s.ts), argMax(s.quality, s.ts)
         FROM samples AS s
-        WHERE (s.tag_id, s.ts) IN (
-            SELECT t.tag_id, max(t.ts)
-            FROM samples AS t
-            WHERE t.tag_id IN ({ids}) AND t.ts <= {at_dt}{lower}
-            GROUP BY t.tag_id
-        )
+        WHERE s.tag_id IN ({ids}) AND s.ts <= {at_dt}{lower}
+        GROUP BY s.tag_id
     """
 
 
@@ -77,7 +73,10 @@ class ClickHouseStore:
         origin, auth = split_http_url(url)
         self._db = database
         self._http = new_client(timeout=30.0, base_url=origin, auth=auth)
-        self._insert_path = f"/?database={quote(database)}&query={quote(_INSERT)}"
+        self._insert_path = (
+            f"/?database={quote(database)}&query={quote(_INSERT)}"
+            "&async_insert=1&wait_for_async_insert=1&async_insert_busy_timeout_ms=10"
+        )
 
     async def ping(self) -> None:
         await self._query("SELECT 1")
@@ -128,7 +127,6 @@ class ClickHouseStore:
                 WHERE s.tag_id IN ({ids})
                   AND s.ts > toDateTime64('{left}', 3, 'UTC')
                   AND s.ts <= toDateTime64('{right}', 3, 'UTC')
-                ORDER BY s.tag_id, s.ts
                 """
             ),
             False,

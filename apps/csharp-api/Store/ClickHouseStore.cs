@@ -31,7 +31,8 @@ public sealed class ClickHouseStore : IStore
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
         }
 
-        _insertPath = "/?database=" + Uri.EscapeDataString(database) + "&query=" + Uri.EscapeDataString(InsertSql);
+        _insertPath = "/?database=" + Uri.EscapeDataString(database) + "&query=" + Uri.EscapeDataString(InsertSql)
+                      + "&async_insert=1&wait_for_async_insert=1&async_insert_busy_timeout_ms=10";
     }
 
     public string Name => "clickhouse";
@@ -108,7 +109,6 @@ public sealed class ClickHouseStore : IStore
             SELECT s.ts, s.tag_id, s.value, s.quality
             FROM samples AS s
             WHERE s.tag_id IN {ids:Array(UInt32)} AND s.ts > {from:DateTime64} AND s.ts <= {to:DateTime64}
-            ORDER BY s.tag_id, s.ts
             """;
         cmd.AddParameter("ids", tagIds.ToArray());
         cmd.AddParameter("from", from.UtcDateTime);
@@ -126,29 +126,21 @@ public sealed class ClickHouseStore : IStore
         {
             cmd.CommandText =
                 """
-                SELECT s.ts, s.tag_id, s.value, s.quality
+                SELECT max(s.ts) AS ts, s.tag_id, argMax(s.value, s.ts) AS value, argMax(s.quality, s.ts) AS quality
                 FROM samples AS s
-                WHERE (s.tag_id, s.ts) IN (
-                    SELECT t.tag_id, max(t.ts)
-                    FROM samples AS t
-                    WHERE t.tag_id IN {ids:Array(UInt32)} AND t.ts <= {at:DateTime64} AND t.ts >= {since:DateTime64}
-                    GROUP BY t.tag_id
-                )
+                WHERE s.tag_id IN {ids:Array(UInt32)} AND s.ts <= {at:DateTime64} AND s.ts >= {since:DateTime64}
+                GROUP BY s.tag_id
                 """;
-            cmd.AddParameter("since", at.UtcDateTime.AddDays(-2));
+            cmd.AddParameter("since", at.UtcDateTime.AddHours(-3));
         }
         else
         {
             cmd.CommandText =
                 """
-                SELECT s.ts, s.tag_id, s.value, s.quality
+                SELECT max(s.ts) AS ts, s.tag_id, argMax(s.value, s.ts) AS value, argMax(s.quality, s.ts) AS quality
                 FROM samples AS s
-                WHERE (s.tag_id, s.ts) IN (
-                    SELECT t.tag_id, max(t.ts)
-                    FROM samples AS t
-                    WHERE t.tag_id IN {ids:Array(UInt32)} AND t.ts <= {at:DateTime64}
-                    GROUP BY t.tag_id
-                )
+                WHERE s.tag_id IN {ids:Array(UInt32)} AND s.ts <= {at:DateTime64}
+                GROUP BY s.tag_id
                 """;
         }
 

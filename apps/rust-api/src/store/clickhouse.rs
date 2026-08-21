@@ -45,13 +45,17 @@ impl ClickHouse {
         if let Some(password) = parsed.password() {
             client = client.with_password(password);
         }
+        client = client
+            .with_option("async_insert", "1")
+            .with_option("wait_for_async_insert", "1")
+            .with_option("async_insert_busy_timeout_ms", "10");
         Ok(Self { client })
     }
 
     async fn locf_query(&self, tag_ids: &[u32], at: DateTime<Utc>, bounded: bool) -> Result<Vec<Sample>> {
         let bound = if bounded {
             format!(
-                " AND ts >= toDateTime64('{}', 3, 'UTC') - INTERVAL 2 DAY",
+                " AND s.ts >= toDateTime64('{}', 3, 'UTC') - INTERVAL 3 HOUR",
                 ch_time(at)
             )
         } else {
@@ -59,15 +63,11 @@ impl ClickHouse {
         };
         let sql = format!(
             r#"
-            SELECT toUnixTimestamp64Milli(s.ts) AS ts, toUInt32(s.tag_id) AS tag_id,
-                   toFloat32(s.value) AS value, toUInt16(s.quality) AS quality
+            SELECT toUnixTimestamp64Milli(max(s.ts)) AS ts, toUInt32(s.tag_id) AS tag_id,
+                   toFloat32(argMax(s.value, s.ts)) AS value, toUInt16(argMax(s.quality, s.ts)) AS quality
             FROM samples AS s
-            WHERE (s.tag_id, s.ts) IN (
-                SELECT t.tag_id, max(t.ts)
-                FROM samples AS t
-                WHERE t.tag_id IN ({}) AND t.ts <= toDateTime64('{}', 3, 'UTC'){bound}
-                GROUP BY t.tag_id
-            )
+            WHERE s.tag_id IN ({}) AND s.ts <= toDateTime64('{}', 3, 'UTC'){bound}
+            GROUP BY s.tag_id
             "#,
             join_ids(tag_ids),
             ch_time(at)
@@ -199,7 +199,6 @@ impl Store for ClickHouse {
             WHERE s.tag_id IN ({})
               AND s.ts > toDateTime64('{}', 3, 'UTC')
               AND s.ts <= toDateTime64('{}', 3, 'UTC')
-            ORDER BY s.tag_id, s.ts
             "#,
             join_ids(tag_ids),
             ch_time(from),

@@ -1,0 +1,76 @@
+backend: csharp
+storage: clickhouse
+status: completed
+when:
+  started_at: '2026-08-21T11:04:33Z'
+  finished_at: '2026-08-21T11:07:48Z'
+services:
+- nats
+- clickhouse
+- csharp-api
+- prometheus
+reuse_volumes: false
+generator:
+  profile: write-ceiling
+  written: 6419000
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 35660.8
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: csharp
+  storage: clickhouse
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: csharp
+  storage: clickhouse
+  ingest_rate: 35455.72462815773
+  write_error_rate: null
+  write_p95_seconds: 0.0960112623181605
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  storage_write_p95_seconds: 0.09601095033242081
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  api_p95_seconds: 0.09612703330751356
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 4.46%
+    mem: 59.48MiB
+  - name: prism-clickhouse-1
+    cpu: 13.84%
+    mem: 772.6MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 11.33MiB
+  - name: prism-prometheus-1
+    cpu: 0.02%
+    mem: 51.7MiB
+  api:
+    cpu: 4.46%
+    mem: 59.48MiB
+  storage:
+    cpu: 13.84%
+    mem: 772.6MiB
+storage_size:
+  bytes: 1521012854
+  mib: 1450.6
+  volume: prism_clickhouse_data
+  path: /var/lib/clickhouse

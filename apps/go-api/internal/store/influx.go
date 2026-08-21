@@ -3,6 +3,8 @@ package store
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +24,7 @@ import (
 type Influx struct {
 	client   influxdb2.Client
 	http     *http.Client
+	base     string
 	writeURL string
 	token    string
 	org      string
@@ -30,8 +33,9 @@ type Influx struct {
 }
 
 func NewInflux(cfg config.Config) (*Influx, error) {
+	base := strings.TrimRight(cfg.InfluxURL, "/")
 	client := influxdb2.NewClient(cfg.InfluxURL, cfg.InfluxToken)
-	writeURL := strings.TrimRight(cfg.InfluxURL, "/") + "/api/v2/write?" + url.Values{
+	writeURL := base + "/api/v2/write?" + url.Values{
 		"org":       {cfg.InfluxOrg},
 		"bucket":    {cfg.InfluxBucket},
 		"precision": {"ns"},
@@ -39,6 +43,7 @@ func NewInflux(cfg config.Config) (*Influx, error) {
 	return &Influx{
 		client:   client,
 		http:     newWriteHTTPClient(30 * time.Second),
+		base:     base,
 		writeURL: writeURL,
 		token:    cfg.InfluxToken,
 		org:      cfg.InfluxOrg,
@@ -61,6 +66,79 @@ func (s *Influx) Ping(ctx context.Context) error {
 	}
 	if !ok {
 		return errors.New("influxdb ping failed")
+	}
+	return s.ensureDBRP(ctx)
+}
+
+type influxDBRPList struct {
+	Content []json.RawMessage `json:"content"`
+}
+
+type influxBucketList struct {
+	Buckets []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"buckets"`
+}
+
+func (s *Influx) ensureDBRP(ctx context.Context) error {
+	q := url.Values{"org": {s.org}, "db": {s.bucket}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/api/v2/dbrps?"+q.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Token "+s.token)
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	closeHTTP(resp)
+	if resp.StatusCode < 300 {
+		var listed influxDBRPList
+		if err := json.Unmarshal(body, &listed); err == nil && len(listed.Content) > 0 {
+			return nil
+		}
+	}
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/api/v2/buckets?"+url.Values{"org": {s.org}, "name": {s.bucket}}.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Token "+s.token)
+	resp, err = s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	body, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	closeHTTP(resp)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("influx buckets %d: %s", resp.StatusCode, body)
+	}
+	var buckets influxBucketList
+	if err := json.Unmarshal(body, &buckets); err != nil || len(buckets.Buckets) == 0 {
+		return fmt.Errorf("influx bucket %q not found", s.bucket)
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"org":              s.org,
+		"bucketID":         buckets.Buckets[0].ID,
+		"database":         s.bucket,
+		"retention_policy": "autogen",
+		"default":          true,
+	})
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, s.base+"/api/v2/dbrps?org="+url.QueryEscape(s.org), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Token "+s.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	body, _ = io.ReadAll(io.LimitReader(resp.Body, 2048))
+	closeHTTP(resp)
+	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusConflict {
+		return fmt.Errorf("influx dbrp %d: %s", resp.StatusCode, body)
 	}
 	return nil
 }
@@ -120,52 +198,198 @@ func (s *Influx) Range(ctx context.Context, tagIDs []uint32, from, to time.Time)
 	return append(seed, mid...), nil
 }
 
-// Archive max gap is 1h; 3h still finds the previous minute/hour point at 364d ago.
-const influxLocfLookback = 3 * time.Hour
-
 func (s *Influx) queryLast(ctx context.Context, tagIDs []uint32, stop time.Time, carried bool) ([]model.Sample, error) {
-	flux := fmt.Sprintf(`
-from(bucket: %q)
-  |> range(start: %s, stop: %s)
-  |> filter(fn: (r) => r._measurement == "samples")
-  |> filter(fn: (r) => %s)
-  |> last()
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-`, s.bucket, stop.Add(-influxLocfLookback).Format(time.RFC3339Nano), stop.Add(time.Nanosecond).Format(time.RFC3339Nano), influxTagFilter(tagIDs))
-	return s.collect(ctx, flux, carried)
+	q := fmt.Sprintf(
+		`SELECT last("value") AS "value", last("quality") AS "quality" FROM "samples" WHERE time <= %s AND %s GROUP BY "tag_id"`,
+		influxQLTime(stop), influxQLTagRE(tagIDs),
+	)
+	return s.queryInfluxQL(ctx, q, carried)
 }
 
 func (s *Influx) queryWindow(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
-	flux := fmt.Sprintf(`
-from(bucket: %q)
-  |> range(start: %s, stop: %s)
-  |> filter(fn: (r) => r._measurement == "samples")
-  |> filter(fn: (r) => %s)
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-`, s.bucket, from.Add(time.Nanosecond).Format(time.RFC3339Nano), to.Add(time.Nanosecond).Format(time.RFC3339Nano), influxTagFilter(tagIDs))
-	return s.collect(ctx, flux, false)
+	q := fmt.Sprintf(
+		`SELECT "value", "quality" FROM "samples" WHERE time > %s AND time <= %s AND %s`,
+		influxQLTime(from), influxQLTime(to), influxQLTagRE(tagIDs),
+	)
+	return s.queryInfluxQL(ctx, q, false)
 }
 
-func (s *Influx) collect(ctx context.Context, flux string, carried bool) ([]model.Sample, error) {
-	result, err := s.client.QueryAPI(s.org).Query(ctx, flux)
+type influxQLResp struct {
+	Results []struct {
+		Error  string `json:"error"`
+		Series []struct {
+			Tags    map[string]string `json:"tags"`
+			Columns []string          `json:"columns"`
+			Values  [][]any           `json:"values"`
+		} `json:"series"`
+	} `json:"results"`
+}
+
+func (s *Influx) queryInfluxQL(ctx context.Context, q string, carried bool) ([]model.Sample, error) {
+	form := url.Values{
+		"org":    {s.org},
+		"bucket": {s.bucket},
+		"db":     {s.bucket},
+		"epoch":  {"ms"},
+		"q":      {q},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base+"/query", strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
-	var out []model.Sample
-	for result.Next() {
-		rec := result.Record()
-		id, _ := strconv.ParseUint(fmt.Sprint(rec.ValueByKey("tag_id")), 10, 32)
-		val, _ := rec.ValueByKey("value").(float64)
-		q := uint16(0)
-		switch raw := rec.ValueByKey("quality").(type) {
-		case int64:
-			q = uint16(raw)
-		case float64:
-			q = uint16(raw)
-		}
-		out = append(out, model.Sample{TS: rec.Time(), TagID: uint32(id), Value: val, Quality: q, Carried: carried})
+	req.Header.Set("Authorization", "Token "+s.token)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/csv")
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return nil, err
 	}
-	return out, result.Err()
+	defer closeHTTP(resp)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("influx query %d: %s", resp.StatusCode, body)
+	}
+	if len(body) == 0 || body[0] != '{' {
+		return parseInfluxCSV(body, carried)
+	}
+	var parsed influxQLResp
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, err
+	}
+	out := make([]model.Sample, 0, 64)
+	for _, result := range parsed.Results {
+		if result.Error != "" {
+			return nil, fmt.Errorf("influxql: %s", result.Error)
+		}
+		for _, series := range result.Series {
+			id, _ := strconv.ParseUint(series.Tags["tag_id"], 10, 32)
+			col := map[string]int{}
+			for i, name := range series.Columns {
+				col[name] = i
+			}
+			ti, okT := col["time"]
+			vi, okV := col["value"]
+			qi, hasQ := col["quality"]
+			if !okT || !okV {
+				continue
+			}
+			for _, row := range series.Values {
+				if ti >= len(row) || vi >= len(row) {
+					continue
+				}
+				ts := influxQLTS(row[ti])
+				val := asFloat(row[vi])
+				q := uint16(0)
+				if hasQ && qi < len(row) {
+					q = uint16(asFloat(row[qi]))
+				}
+				out = append(out, model.Sample{TS: ts, TagID: uint32(id), Value: val, Quality: q, Carried: carried})
+			}
+		}
+	}
+	return out, nil
+}
+
+func influxQLTime(t time.Time) string {
+	return "'" + t.UTC().Format(time.RFC3339Nano) + "'"
+}
+
+func influxQLTagRE(ids []uint32) string {
+	if len(ids) == 0 {
+		return "true"
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatUint(uint64(id), 10)
+	}
+	return `tag_id =~ /^(` + strings.Join(parts, "|") + `)$/`
+}
+
+func influxQLTS(v any) time.Time {
+	switch t := v.(type) {
+	case float64:
+		return time.UnixMilli(int64(t)).UTC()
+	case json.Number:
+		n, _ := t.Int64()
+		return time.UnixMilli(n).UTC()
+	case string:
+		if ts, err := time.Parse(time.RFC3339Nano, t); err == nil {
+			return ts.UTC()
+		}
+		if n, err := strconv.ParseInt(t, 10, 64); err == nil {
+			return time.UnixMilli(n).UTC()
+		}
+	}
+	return time.Time{}
+}
+
+func parseInfluxCSV(body []byte, carried bool) ([]model.Sample, error) {
+	cr := csv.NewReader(bytes.NewReader(body))
+	cr.ReuseRecord = true
+	cr.LazyQuotes = true
+	cr.FieldsPerRecord = -1
+	idx := map[string]int{}
+	header := false
+	out := make([]model.Sample, 0, 1024)
+	for {
+		row, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(row) == 0 || strings.HasPrefix(row[0], "#") {
+			continue
+		}
+		if !header {
+			for i, name := range row {
+				idx[strings.ToLower(strings.TrimSpace(name))] = i
+			}
+			if _, ok := idx["time"]; !ok {
+				continue
+			}
+			header = true
+			continue
+		}
+		ti, okT := idx["time"]
+		vi, okV := idx["value"]
+		if !okT || !okV || ti >= len(row) || vi >= len(row) {
+			continue
+		}
+		id := uint32(0)
+		if i, ok := idx["tag_id"]; ok && i < len(row) {
+			n, _ := strconv.ParseUint(row[i], 10, 32)
+			id = uint32(n)
+		} else if i, ok := idx["tags"]; ok && i < len(row) {
+			id = tagIDFromInfluxTags(row[i])
+		}
+		q := uint16(0)
+		if i, ok := idx["quality"]; ok && i < len(row) {
+			f, _ := strconv.ParseFloat(row[i], 64)
+			q = uint16(f)
+		}
+		val, _ := strconv.ParseFloat(row[vi], 64)
+		out = append(out, model.Sample{
+			TS: influxQLTS(row[ti]), TagID: id, Value: val, Quality: q, Carried: carried,
+		})
+	}
+	return out, nil
+}
+
+func tagIDFromInfluxTags(s string) uint32 {
+	s = strings.Trim(s, `"`)
+	for _, part := range strings.Split(s, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && k == "tag_id" {
+			n, _ := strconv.ParseUint(v, 10, 32)
+			return uint32(n)
+		}
+	}
+	return 0
 }
 
 func (s *Influx) UpsertTags(_ context.Context, tags []model.Tag) error {
@@ -175,20 +399,6 @@ func (s *Influx) UpsertTags(_ context.Context, tags []model.Tag) error {
 
 func (s *Influx) ListTags(_ context.Context) ([]model.Tag, error) {
 	return s.tags.list(), nil
-}
-
-func influxTagFilter(ids []uint32) string {
-	if len(ids) == 0 {
-		return "true"
-	}
-	expr := ""
-	for i, id := range ids {
-		if i > 0 {
-			expr += " or "
-		}
-		expr += fmt.Sprintf(`r.tag_id == %q`, strconv.FormatUint(uint64(id), 10))
-	}
-	return expr
 }
 
 type catalogMem struct {
