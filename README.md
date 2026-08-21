@@ -125,6 +125,8 @@ python sessions/run.py compare <id>    # печать scorecard
 
 Писать `conclude` имеет смысл уже поверх этих цифр: почему locf у QuestDB быстрее, а write у ClickHouse держит rate.
 
+Сводка прогонов записи/чтения и куда копать дальше: [sessions/REPORT-write-read-2026-08.md](sessions/REPORT-write-read-2026-08.md).
+
 ## Метрики
 
 Те же три слоя: `api`, `backend` (`write` / `locf` / `range`), `storage`.

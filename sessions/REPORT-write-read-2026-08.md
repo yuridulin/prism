@@ -10,8 +10,10 @@
 | 2026-08-19 16:51 | `20260819T165135-write-ceiling` | write-ceiling, 3 мин | Запись после COPY / ILP / line protocol / batch |
 | 2026-08-20 16:49 | `20260820T164920-query-mix` | query-mix, 5 мин чтения | Чтение на годовом архиве, Go × 5 БД, наивные locf/range |
 | 2026-08-20 18:06 | `20260820T180620-query-mix` | query-mix, 5 мин, `--keep` | Повтор только чтения на том же архиве после правок сторов |
+| 2026-08-21 09:56 | `20260821T095609-write-ceiling` | write-ceiling, 3 мин | Полная матрица 4×5 после COPY / ILP / JSON hot path |
+| 2026-08-21 11:34 | `20260821T113416-query-mix` | query-mix, 5 мин + seed | Полная матрица 4×5 чтения на свежем годовом архиве |
 
-Хост: Windows + Docker Desktop, data-root на `D:`. Пары **строго по очереди** (параллельный прогон ломает сравнение). Каждая пара write-ceiling: `down -v` → up только её сервисов → нагрузка → запись scorecard → wipe. Query-mix второй цикл: тома **не** удаляли.
+Хост: Windows + Docker Desktop, data-root на `D:`. Пары **строго по очереди** (параллельный прогон ломает сравнение). Каждая пара write-ceiling: `down -v` → up только её сервисов → нагрузка → запись scorecard → wipe. Query-mix 20.08 второй цикл: тома **не** удаляли. Query-mix 21.08 — полная матрица с wipe и seed на каждую пару.
 
 ---
 
@@ -357,7 +359,7 @@ QuestDB в этом id сначала получил 334 DNS-ошибки (го�
 
 ### Чего в цифрах нет
 
-- Python / C# / Rust на query-mix (адаптеры чтения у них те же идеи, но p95 не сняты).
+- ~~Python / C# / Rust на query-mix~~ — снято 21.08, см. §7.
 - `high-cardinality` (10k тегов, 4k/s) и `burst` (8k/s, 5% OoO, late 2.5 с) — профили есть, полной арены нет.
 - `iot-steady` (NATS, 2k/s, 250 тегов) — на таком offer пары по rate не разъедутся.
 - sample/twavg, даунсэмпл, ретеншн-политики короче года.
@@ -381,3 +383,62 @@ QuestDB в этом id сначала получил 334 DNS-ошибки (го�
 10. **Retention и диск** после той же истории, не empty.
 
 Исходники цифр: `sessions/<id>/comparison.yaml`, `session.yaml`, `pairs/*/pair.yaml`. Генератор: `ingest/generator/`. Профили: `profiles/write-ceiling.yaml`, `profiles/query-mix.yaml`.
+
+---
+
+## 7. Прогон 21 августа: находки и куда копать дальше
+
+Сессии: `20260821T095609-write-ceiling`, `20260821T113416-query-mix`. Код адаптеров — `6a98c6b`. Сравнение записи — с `sessions/arena-baseline.yaml` (наивные адаптеры). Сравнение чтения Go — с `20260820T180620-query-mix`.
+
+Оговорка по envelope: этот write-ceiling шёл с генератором из `sessions/defaults.yaml` (**1 CPU / 512M**). Baseline и rematch 19.08 — генератор **2 CPU / 1G**. Пары у потолка JSON (VM, отчасти Influx) на этом прогоне нельзя сравнивать с rematch как «адаптер стал медленнее». Timescale/QuestDB выросли на порядок — это не артефакт лимита генератора.
+
+### 7.1 Что сработало на записи
+
+ingest/s vs наивный baseline (×):
+
+| | QuestDB | ClickHouse | Timescale | Influx | VM |
+|---|---:|---:|---:|---:|---:|
+| Go | 75k (×3.0) | 61k (×1.7) | **115k (×19)** | 89k (×1.2) | 122k (~1×) |
+| Python | 83k (×7.1) | 32k (×1.3)* | 64k (×10) | 57k (×1.9) | 66k (ниже baseline) |
+| C# | 103k (×4.0) | 36k (×1.7) | 98k (×27) | 82k (×1.1) | 107k (чуть ниже) |
+| Rust | 114k (×4.5) | 62k (×1.6)* | 108k (×24) | 88k (×1.1) | **126k (~1×)** |
+
+\* python/rust × ClickHouse: **8 write errors**. Остальные пары — 0.
+
+Вывод: дальше гнать ingest VM бессмысленно — упираемся в JSON `POST /v1/write` и CPU генератора. Запас был у Timescale (COPY STDIN, `synchronous_commit=off`) и QuestDB (ILP TCP пул 8). ClickHouse `async_insert` дал мало; диск write-ceiling 1.3–2.2 GiB — это 3 мин uncompressed flood, compress_after 30 мин ещё не успел.
+
+### 7.2 Что сработало на чтении (Go vs 20.08)
+
+Тот же архив ~4.8356e6 точек. Go:
+
+| Стор | locf | range | диск | vs 20.08 |
+|---|---:|---:|---:|---|
+| QuestDB | 4.9 | **339** | 425 | range 2165→339 |
+| ClickHouse | **4.9** | **136** | **751** | locf/range быстрее, диск 236→751 |
+| Timescale | **8.9** | 400 | **344** | locf 66→9; диск 994→344 (compression policy) |
+| Influx | 416 | **10000** | 96 | хуже: locf 96→416, range 7245→timeout |
+| VM | 6.1 | 186 | 14.7 | range 232→186, диск без изменений |
+
+Полная матрица 4×5 теперь есть. Победители locf/range по цифрам — python/csharp × VM (~4.8 ms). Это **подозрительно быстро**: у Python/C# quality уходит **тегом**, у Go — полем `prism_sample`. Проверить, что range не пустой.
+
+Дыры этого прогона:
+
+- **Influx range p95 = 10 с** на Go/C#/Rust (гистограмма/таймаут). Причина: InfluxQL JSON ~345k точек. CSV `Accept: application/csv` уже в дереве — **не переизмерено**.
+- **rust-questdb: 2406 query errors** — `/exp` timestamp layout. Парсер расширен, битые строки скипаются — **не переизмерено**.
+- **csharp-influxdb: 29 query errors**, CPU API 96%, range 10 с — тот же JSON.
+- **Python** на Timescale/QuestDB/CH: locf 0.2–1.8 с, range ~2 с, QuestDB API CPU 82%. Узкое место — pydantic/`Sample()` на 345k точек, не БД. `model_construct` + UTC — **не переизмерено**.
+- **ClickHouse диск ×3** на query-mix: в том прогоне `index_granularity=1024`. В дереве вернули **8192**. Не гонять granularity вниз.
+
+### 7.3 Куда копать (порядок)
+
+Не трогать: OpenAPI, envelope, семантику locf/range, чужой `apps/<backend>`, генератор, профили.
+
+1. **Переснять query-mix** после уже лежащих правок (`--from-pair` / `--only-pair`): Influx CSV, rust-questdb `/exp`, Python `model_construct`, CH granularity 8192. Без этого цифры §7.2 частично протухли.
+2. **Influx**: оставить CSV (или Flux без pivot). locf — unbounded `last()`, не окно 3h. Quality не класть в tags.
+3. **ClickHouse**: granularity 8192; разобрать 8 write errors (async_insert wait / too many parts). Не мельчить parts.
+4. **Python read**: не строить 345k pydantic-моделей; стримить CSV/RowBinary. Timescale locf 1756 ms — проверить timezone/`timestamptz`.
+5. **VM line protocol** выровнять между API (measurement vs field `prism_sample`, quality field vs tag). Сверить, что C#/Python range реально возвращает точки.
+6. **QuestDB rust** — формат ts как у Go: `2006-01-02T15:04:05.000000Z`.
+7. Запись: не поднимать CPU генератора «чтобы догнать rematch». ClickHouse/Influx write — следующий рычаг только если §1–3 закрыты.
+
+Не делали и не обещаем этой заметкой: high-cardinality, burst, смешанный write+read, даунсэмпл range.
