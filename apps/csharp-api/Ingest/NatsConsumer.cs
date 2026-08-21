@@ -44,19 +44,25 @@ public static class NatsConsumer
             return;
         }
 
-        WriteRequest? req;
+        List<WriteSample>? items;
         try
         {
-            req = JsonSerializer.Deserialize<WriteRequest>(data, json);
-            if (req?.Samples is null || req.Samples.Count == 0)
+            using var doc = JsonDocument.Parse(data);
+            items = doc.RootElement.ValueKind switch
             {
-                var one = JsonSerializer.Deserialize<WriteSample>(data, json);
-                if (one is null)
-                {
-                    return;
-                }
-
-                req = new WriteRequest { Samples = [one] };
+                JsonValueKind.Array => JsonSerializer.Deserialize<List<WriteSample>>(data, json),
+                JsonValueKind.Object when doc.RootElement.TryGetProperty("samples", out _) =>
+                    JsonSerializer.Deserialize<SamplesWrap>(data, json)?.Samples,
+                JsonValueKind.Object =>
+                [
+                    JsonSerializer.Deserialize<WriteSample>(data, json)!
+                ],
+                _ => null
+            };
+            items = items?.Where(s => s is not null).ToList();
+            if (items is null || items.Count == 0)
+            {
+                return;
             }
         }
         catch (JsonException ex)
@@ -66,13 +72,8 @@ public static class NatsConsumer
             return;
         }
 
-        if (req.Samples.Count == 0)
-        {
-            return;
-        }
-
         var now = DateTimeOffset.UtcNow;
-        var samples = req.Samples.Select(s => s.Normalize(now)).ToList();
+        var samples = items.Select(s => s.Normalize(now)).ToList();
         var start = Stopwatch.StartNew();
         try
         {

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import nats
 
 from app.metrics import observe_backend, track
-from app.models import Sample, WriteRequest
+from app.models import parse_write_payload
 from app.store.base import Store
 
 log = logging.getLogger("prism.nats")
@@ -28,18 +28,11 @@ async def run_consumer(url: str, subject: str, store: Store) -> None:
     async def handler(msg) -> None:
         try:
             payload = json.loads(msg.data.decode())
-            if "samples" in payload:
-                samples = WriteRequest.model_validate(payload).samples
-            else:
-                samples = [Sample.model_validate(payload)]
-            if not samples:
+            items = parse_write_payload(payload)
+            if not items:
                 return
             now = datetime.now(timezone.utc)
-            for s in samples:
-                if s.ts.tzinfo is None:
-                    s.ts = s.ts.replace(tzinfo=timezone.utc)
-                if s.ts == datetime(1970, 1, 1, tzinfo=timezone.utc):
-                    s.ts = now
+            samples = [item.to_sample(now) for item in items]
             with track() as elapsed:
                 try:
                     await store.write(samples)

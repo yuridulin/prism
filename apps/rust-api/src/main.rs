@@ -12,13 +12,13 @@ use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use chrono::Utc;
 use metrics_exporter_prometheus::PrometheusHandle;
 use model::{
-    valid_mode, ErrorBody, ErrorDetail, Meta, ReadRequest, TagList, TagWriteRequest, TagWriteResponse, WriteRequest,
-    WriteResponse, CONTRACT, OPS, STORAGES,
+    parse_write_payload, ErrorBody, ErrorDetail, Meta, TagList, TagWriteRequest, TagWriteResponse, ValuesRequest,
+    WriteItem, WriteResponse, CONTRACT, OPS, STORAGES,
 };
 use store::Store;
 
@@ -169,14 +169,14 @@ async fn meta(State(state): State<AppState>) -> Json<Meta> {
 
 async fn write_samples(
     State(state): State<AppState>,
-    body: Result<Json<WriteRequest>, JsonRejection>,
+    body: Result<Json<Vec<WriteItem>>, JsonRejection>,
 ) -> Result<Json<WriteResponse>, AppError> {
-    let req = json_body(body)?;
-    if req.samples.is_empty() {
-        return Err(AppError::invalid("samples is required"));
+    let items = json_body(body)?;
+    if items.is_empty() {
+        return Err(AppError::invalid("values array is required"));
     }
     let now = Utc::now();
-    let samples: Vec<_> = req.samples.into_iter().map(|s| s.normalize(now)).collect();
+    let samples: Vec<_> = items.into_iter().map(|s| s.normalize(now)).collect();
     let start = Instant::now();
     let err = state.store.write(&samples).await.err();
     crate::metrics::observe_backend(
@@ -197,60 +197,37 @@ async fn write_samples(
 
 async fn read_handler(
     State(state): State<AppState>,
-    body: Result<Json<ReadRequest>, JsonRejection>,
-) -> Result<Json<model::ReadResult>, AppError> {
+    body: Result<Json<ValuesRequest>, JsonRejection>,
+) -> Result<Json<model::ValuesResponse>, AppError> {
     serve_read(state, json_body(body)?).await
 }
 
-async fn locf_handler(
-    State(state): State<AppState>,
-    body: Result<Json<ReadRequest>, JsonRejection>,
-) -> Result<Json<model::ReadResult>, AppError> {
-    let mut req = json_body(body)?;
-    req.mode = "locf".to_string();
-    serve_read(state, req).await
-}
-
-async fn range_handler(
-    State(state): State<AppState>,
-    body: Result<Json<ReadRequest>, JsonRejection>,
-) -> Result<Json<model::ReadResult>, AppError> {
-    let mut req = json_body(body)?;
-    req.mode = "range".to_string();
-    serve_read(state, req).await
-}
-
-async fn serve_read(state: AppState, req: ReadRequest) -> Result<Json<model::ReadResult>, AppError> {
-    if !valid_mode(&req.mode) {
-        return Err(AppError::invalid("mode must be locf, range, sample or twavg"));
+async fn serve_read(state: AppState, req: ValuesRequest) -> Result<Json<model::ValuesResponse>, AppError> {
+    if req.tags_id.is_empty() {
+        return Err(AppError::invalid("tagsId is required"));
     }
-    if req.tag_ids.is_empty() {
-        return Err(AppError::invalid("tag_ids is required"));
-    }
+    let mode = req.mode();
     let start = Instant::now();
-    let raw = match req.mode.as_str() {
-        "locf" => {
-            let at = req.at.ok_or_else(|| AppError::invalid("at is required"))?;
-            state.store.locf(&req.tag_ids, at).await
+    let raw = match mode {
+        "range" => {
+            let from = req.old.ok_or_else(|| AppError::invalid("old and young are required"))?;
+            let to = req.young.ok_or_else(|| AppError::invalid("old and young are required"))?;
+            state.store.range(&req.tags_id, from, to).await
         }
-        _ => {
-            let from = req.from.ok_or_else(|| AppError::invalid("from and to are required"))?;
-            let to = req.to.ok_or_else(|| AppError::invalid("from and to are required"))?;
-            state.store.range(&req.tag_ids, from, to).await
-        }
+        _ => state.store.locf(&req.tags_id, req.at()).await,
     };
     let err = raw.as_ref().err().map(|e| e.to_string());
     let items = raw.as_ref().map(|v| v.len()).unwrap_or(0);
     crate::metrics::observe_backend(
         state.store.name(),
-        &req.mode,
+        mode,
         "http",
         items,
         start.elapsed(),
         err.is_some(),
     );
     match raw {
-        Ok(samples) => Ok(Json(read::assemble(&req.mode, &req, &samples))),
+        Ok(samples) => Ok(Json(read::assemble(&req, &samples))),
         Err(e) => Err(AppError::storage(e.to_string())),
     }
 }
@@ -297,12 +274,10 @@ fn app(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics_endpoint))
+        .route("/api/meta", get(meta))
         .route("/v1/meta", get(meta))
-        .route("/v1/tags", get(list_tags).post(upsert_tags))
-        .route("/v1/write", post(write_samples))
-        .route("/v1/read", post(read_handler))
-        .route("/v1/locf", post(locf_handler))
-        .route("/v1/range", post(range_handler))
+        .route("/api/tags", get(list_tags).post(upsert_tags))
+        .route("/api/values", post(read_handler).put(write_samples))
         .layer(middleware::from_fn_with_state(state.clone(), instrument))
         .with_state(state)
 }
@@ -332,19 +307,12 @@ async fn subscribe_nats(url: String, subject: String, store: Arc<dyn Store>) {
 }
 
 async fn handle_nats(store: &Arc<dyn Store>, payload: &[u8]) -> Result<(), String> {
-    let req = match serde_json::from_slice::<WriteRequest>(payload) {
-        Ok(r) => r,
-        Err(_) => {
-            let one: model::WriteSample =
-                serde_json::from_slice(payload).map_err(|e| format!("nats decode error: {e}"))?;
-            WriteRequest { samples: vec![one] }
-        }
-    };
-    if req.samples.is_empty() {
+    let items = parse_write_payload(payload)?;
+    if items.is_empty() {
         return Ok(());
     }
     let now = Utc::now();
-    let samples: Vec<_> = req.samples.into_iter().map(|s| s.normalize(now)).collect();
+    let samples: Vec<_> = items.into_iter().map(|s| s.normalize(now)).collect();
     let start = Instant::now();
     let err = store.write(&samples).await.err();
     crate::metrics::observe_backend(store.name(), "write", "nats", samples.len(), start.elapsed(), err.is_some());

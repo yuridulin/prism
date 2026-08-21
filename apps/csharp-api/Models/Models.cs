@@ -4,9 +4,9 @@ namespace Prism.Api.Models;
 
 public static class Contract
 {
-    public const string Version = "v1.1";
+    public const string Version = "v1.2";
     public const ushort QualityGood = 192;
-    public static readonly string[] Ops = ["write", "locf", "range", "sample", "twavg", "tags"];
+    public static readonly string[] Ops = ["write", "locf", "range", "tags"];
 }
 
 public sealed class Sample
@@ -15,32 +15,44 @@ public sealed class Sample
     public uint TagId { get; set; }
     public double Value { get; set; }
     public ushort Quality { get; set; } = Contract.QualityGood;
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Carried { get; set; }
 }
 
 public sealed class WriteSample
 {
+    public uint? Id { get; set; }
+
+    [JsonPropertyName("tag_id")]
+    public uint? TagId { get; set; }
+
+    public DateTimeOffset? Date { get; set; }
+
+    [JsonPropertyName("ts")]
     public DateTimeOffset? Ts { get; set; }
-    public uint TagId { get; set; }
+
     public double Value { get; set; }
     public ushort? Quality { get; set; }
 
     public Sample Normalize(DateTimeOffset now)
     {
-        var ts = Ts is null || Ts.Value == default ? now : Ts.Value;
+        var id = Id ?? TagId ?? 0;
+        var ts = Date ?? Ts;
+        if (ts is null || ts.Value == default)
+        {
+            ts = now;
+        }
+
         return new Sample
         {
-            Ts = ts.ToUniversalTime(),
-            TagId = TagId,
+            Ts = ts.Value.ToUniversalTime(),
+            TagId = id,
             Value = Value,
             Quality = Quality ?? Contract.QualityGood
         };
     }
 }
 
-public sealed class WriteRequest
+public sealed class SamplesWrap
 {
     public List<WriteSample> Samples { get; set; } = [];
 }
@@ -72,31 +84,45 @@ public sealed class TagWriteResponse
     public int Upserted { get; set; }
 }
 
-public sealed class ReadRequest
+public sealed class ValuesRequest
 {
-    public string Mode { get; set; } = "";
-    public List<uint> TagIds { get; set; } = [];
-    public DateTimeOffset? At { get; set; }
-    public DateTimeOffset? From { get; set; }
-    public DateTimeOffset? To { get; set; }
-    public string? Step { get; set; }
+    public string? RequestKey { get; set; }
+    public List<uint> TagsId { get; set; } = [];
+    public DateTimeOffset? Exact { get; set; }
+    public DateTimeOffset? Old { get; set; }
+    public DateTimeOffset? Young { get; set; }
+
+    public string Mode() =>
+        Old is not null && Old != default && Young is not null && Young != default ? "range" : "locf";
+
+    public DateTimeOffset At()
+    {
+        if (Exact is not null && Exact != default)
+        {
+            return Exact.Value.ToUniversalTime();
+        }
+
+        return DateTimeOffset.UtcNow;
+    }
 }
 
-public sealed class Series
+public sealed class ValueRecord
 {
-    public uint TagId { get; set; }
-    public double? Value { get; set; }
-    public List<Sample> Samples { get; set; } = [];
+    public DateTimeOffset Date { get; set; }
+    public double Value { get; set; }
+    public ushort Quality { get; set; }
 }
 
-public sealed class ReadResult
+public sealed class ValuesTag
 {
-    public string Mode { get; set; } = "";
-    public DateTimeOffset? At { get; set; }
-    public DateTimeOffset? From { get; set; }
-    public DateTimeOffset? To { get; set; }
-    public string? Step { get; set; }
-    public List<Series> Series { get; set; } = [];
+    public uint Id { get; set; }
+    public List<ValueRecord> Values { get; set; } = [];
+}
+
+public sealed class ValuesResponse
+{
+    public string? RequestKey { get; set; }
+    public List<ValuesTag> Tags { get; set; } = [];
 }
 
 public sealed class Meta

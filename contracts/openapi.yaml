@@ -1,21 +1,20 @@
 openapi: 3.1.0
 info:
   title: Prism Time-Series API
-  version: 1.1.0
+  version: 1.2.0
   description: |
-    Единый контракт для всех бэкендов стенда (Go, Python, C#, Rust).
+    Контракт стенда, по форме близкий к Datalake `/api/values`:
+      POST — одно чтение (не массив запросов), PUT — пачка точек.
 
-    Модель — каталог тегов + append-only ряды:
-      ts (UTC), tag_id (uint32), value (float32), quality (OPC DA uint16).
+    Без `Func` / `Resolution` / sample / twavg. Только LOCF и сырой range.
 
-    Чтение:
-      1. locf   — last observation carried forward на момент `at` (основной)
-      2. range  — locf на `from` + все точки (from, to] (основной)
-      3. sample — range, затем сэмплирование с протяжкой LOCF
-      4. twavg  — range, затем средневзвешенное по времени
+    Чтение (одно тело, не `ValuesRequest[]`):
+      - `exact` — locf на момент (как current / ExactLocf)
+      - `old` + `young` — locf на old + точки (old, young]
+      - ни того ни другого — locf на now
 
-    Канонические операции — POST. Ошибки: `{ "error": { "code", "message" } }`.
-    Хранилище выбирается `PRISM_STORAGE`.
+    Запись: PUT JSON-массив `{ id, value, date, quality }` (как Datalake PUT).
+    Каталог — `/api/tags`. Ошибки: `{ "error": { "code", "message" } }`.
 servers:
   - url: http://localhost:8081
     description: Go API
@@ -46,7 +45,7 @@ paths:
       responses:
         "200":
           description: Exposition format
-  /v1/meta:
+  /api/meta:
     get:
       summary: Активный backend/storage и поддерживаемые операции
       responses:
@@ -56,7 +55,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Meta"
-  /v1/tags:
+  /v1/meta:
+    get:
+      summary: Alias of /api/meta
+      responses:
+        "200":
+          description: Meta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meta"
+  /api/tags:
     get:
       summary: Каталог тегов
       responses:
@@ -83,15 +92,37 @@ paths:
                 $ref: "#/components/schemas/TagWriteResponse"
         "400":
           $ref: "#/components/responses/Error"
-  /v1/write:
+  /api/values:
     post:
-      summary: Дописать пачку сэмплов
+      summary: Чтение значений (одно тело, не массив запросов)
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/WriteRequest"
+              $ref: "#/components/schemas/ValuesRequest"
+      responses:
+        "200":
+          description: Values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValuesResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+    put:
+      summary: Запись пачки точек
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              items:
+                $ref: "#/components/schemas/ValueWriteRequest"
       responses:
         "200":
           description: Written
@@ -103,62 +134,6 @@ paths:
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
-  /v1/read:
-    post:
-      summary: Чтение в одном из четырёх режимов
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ReadRequest"
-      responses:
-        "200":
-          description: Series
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReadResult"
-        "400":
-          $ref: "#/components/responses/Error"
-        "500":
-          $ref: "#/components/responses/Error"
-  /v1/locf:
-    post:
-      summary: Exact LOCF (mode=locf)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/LocfRequest"
-      responses:
-        "200":
-          description: Series
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReadResult"
-        "400":
-          $ref: "#/components/responses/Error"
-  /v1/range:
-    post:
-      summary: LOCF + start..end (mode=range)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RangeRequest"
-      responses:
-        "200":
-          description: Series
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReadResult"
-        "400":
-          $ref: "#/components/responses/Error"
 components:
   responses:
     Error:
@@ -168,122 +143,80 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
-    Sample:
+    ValueWriteRequest:
       type: object
-      required: [tag_id, value]
+      required: [id, value]
       properties:
-        ts:
-          type: string
-          format: date-time
-          description: UTC. Если пусто на записи — now().
-        tag_id:
+        id:
           type: integer
           minimum: 0
           maximum: 4294967295
         value:
           type: number
           format: float
+        date:
+          type: string
+          format: date-time
+          description: UTC. Если пусто — now().
         quality:
           type: integer
           minimum: 0
           maximum: 65535
           default: 192
-          description: |
-            OPC DA quality word.
-            192 (0xC0) Good, 64 (0x40) Uncertain, 0 Bad.
-        carried:
-          type: boolean
-          description: true, если значение протянуто LOCF, а не записано в этой точке
-    WriteRequest:
-      type: object
-      required: [samples]
-      properties:
-        samples:
-          type: array
-          items:
-            $ref: "#/components/schemas/Sample"
+          description: OPC DA quality word. 192 Good, 64 Uncertain, 0 Bad.
     WriteResponse:
       type: object
       required: [written]
       properties:
         written: { type: integer }
-    ReadMode:
-      type: string
-      enum: [locf, range, sample, twavg]
-    ReadRequest:
+    ValuesRequest:
       type: object
-      required: [mode, tag_ids]
+      required: [tagsId]
       properties:
-        mode:
-          $ref: "#/components/schemas/ReadMode"
-        tag_ids:
+        requestKey:
+          type: string
+          description: Эхо в ответе
+        tagsId:
           type: array
           items: { type: integer, minimum: 0, maximum: 4294967295 }
           minItems: 1
-        at:
+        exact:
           type: string
           format: date-time
-          description: Обязателен для locf
-        from:
+          description: LOCF на этот момент (current / ExactLocf)
+        old:
           type: string
           format: date-time
-          description: Обязателен для range / sample / twavg
-        to:
+          description: Начало range, включительно для LOCF-seed
+        young:
           type: string
           format: date-time
-        step:
-          type: string
-          default: 1m
-          description: Шаг сэмплирования, обязателен для sample
-    LocfRequest:
+          description: Конец range
+    ValueRecord:
       type: object
-      required: [tag_ids, at]
+      required: [date, value, quality]
       properties:
-        tag_ids:
-          type: array
-          items: { type: integer }
-        at:
-          type: string
-          format: date-time
-    RangeRequest:
+        date: { type: string, format: date-time }
+        value: { type: number, format: float }
+        quality: { type: integer }
+    ValuesTag:
       type: object
-      required: [tag_ids, from, to]
+      required: [id, values]
       properties:
-        tag_ids:
-          type: array
-          items: { type: integer }
-        from:
-          type: string
-          format: date-time
-        to:
-          type: string
-          format: date-time
-    Series:
-      type: object
-      required: [tag_id, samples]
-      properties:
-        tag_id: { type: integer }
-        value:
-          type: number
-          description: Результат twavg
-        samples:
+        id: { type: integer }
+        values:
           type: array
           items:
-            $ref: "#/components/schemas/Sample"
-    ReadResult:
+            $ref: "#/components/schemas/ValueRecord"
+    ValuesResponse:
       type: object
-      required: [mode, series]
+      required: [tags]
       properties:
-        mode:
-          $ref: "#/components/schemas/ReadMode"
-        at: { type: string, format: date-time }
-        from: { type: string, format: date-time }
-        to: { type: string, format: date-time }
-        step: { type: string }
-        series:
+        requestKey: { type: string }
+        tags:
           type: array
           items:
-            $ref: "#/components/schemas/Series"
+            $ref: "#/components/schemas/ValuesTag"
     Tag:
       type: object
       required: [id, name]
@@ -321,10 +254,10 @@ components:
         storages:
           type: array
           items: { type: string }
-        contract: { type: string, examples: ["v1.1"] }
+        contract: { type: string, examples: ["v1.2"] }
         ops:
           type: array
-          items: { type: string, enum: [write, locf, range, sample, twavg, tags] }
+          items: { type: string, enum: [write, locf, range, tags] }
     Error:
       type: object
       required: [error]

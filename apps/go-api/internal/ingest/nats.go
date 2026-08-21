@@ -1,8 +1,10 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"time"
 
@@ -37,23 +39,38 @@ func Subscribe(url, subject string, st store.Store) (*Consumer, error) {
 	return c, nil
 }
 
-func (c *Consumer) handle(msg *nats.Msg) {
-	var req model.WriteRequest
-	if err := json.Unmarshal(msg.Data, &req); err != nil {
-		var one model.WriteSample
-		if err2 := json.Unmarshal(msg.Data, &one); err2 != nil {
-			metrics.ObserveBackend(c.store.Name(), "write", "nats", 0, 0, err)
-			log.Printf("nats decode error: %v", err)
-			return
-		}
-		req.Samples = []model.WriteSample{one}
+func decodeWrite(data []byte) []model.WriteItem {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil
 	}
-	if len(req.Samples) == 0 {
+	if data[0] == '[' {
+		var items []model.WriteItem
+		if json.Unmarshal(data, &items) == nil {
+			return items
+		}
+	}
+	var wrap model.SamplesWrap
+	if json.Unmarshal(data, &wrap) == nil && len(wrap.Samples) > 0 {
+		return wrap.Samples
+	}
+	var one model.WriteItem
+	if json.Unmarshal(data, &one) == nil && one.ID != 0 {
+		return []model.WriteItem{one}
+	}
+	return nil
+}
+
+func (c *Consumer) handle(msg *nats.Msg) {
+	items := decodeWrite(msg.Data)
+	if len(items) == 0 {
+		metrics.ObserveBackend(c.store.Name(), "write", "nats", 0, 0, errors.New("empty payload"))
+		log.Printf("nats decode error: empty payload")
 		return
 	}
 	now := time.Now().UTC()
-	samples := make([]model.Sample, 0, len(req.Samples))
-	for _, raw := range req.Samples {
+	samples := make([]model.Sample, 0, len(items))
+	for _, raw := range items {
 		samples = append(samples, raw.Normalize(now))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

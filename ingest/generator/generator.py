@@ -58,11 +58,11 @@ class Publisher:
             self._nc = await nats.connect(self.nats_url, name="prism-generator")
 
     async def write(self, samples: list[dict]) -> None:
-        body = json.dumps({"samples": samples}).encode()
+        body = json.dumps(samples).encode()
         if self.transport == "http":
             assert self._http is not None
-            resp = await self._http.post(
-                f"{self.http_url}/v1/write",
+            resp = await self._http.put(
+                f"{self.http_url}/api/values",
                 content=body,
                 headers={"Content-Type": "application/json"},
             )
@@ -73,16 +73,16 @@ class Publisher:
 
     async def write_http(self, samples: list[dict]) -> None:
         assert self._http is not None
-        resp = await self._http.post(
-            f"{self.http_url}/v1/write",
-            json={"samples": samples},
+        resp = await self._http.put(
+            f"{self.http_url}/api/values",
+            json=samples,
             headers={"Content-Type": "application/json"},
         )
         resp.raise_for_status()
 
     async def read(self, payload: dict) -> None:
         assert self._http is not None
-        resp = await self._http.post(f"{self.http_url}/v1/read", json=payload)
+        resp = await self._http.post(f"{self.http_url}/api/values", json=payload)
         resp.raise_for_status()
 
     async def close(self) -> None:
@@ -115,8 +115,8 @@ def make_sample(profile: Profile, rng: random.Random, now: datetime) -> dict:
         ts = now - timedelta(milliseconds=lag)
     tag_id = pick_tag(profile, rng)
     return {
-        "ts": rfc3339(ts),
-        "tag_id": tag_id,
+        "id": tag_id,
+        "date": rfc3339(ts),
         "value": round(max(0.0, sample_value(tag_id, ts) + rng.uniform(-4, 4)), 4),
         "quality": pick_quality(profile, rng),
     }
@@ -124,8 +124,8 @@ def make_sample(profile: Profile, rng: random.Random, now: datetime) -> dict:
 
 def make_archive_sample(tag_id: int, ts: datetime) -> dict:
     return {
-        "ts": rfc3339(ts),
-        "tag_id": tag_id,
+        "id": tag_id,
+        "date": rfc3339(ts),
         "value": sample_value(tag_id, ts),
         "quality": QUALITY_GOOD,
     }
@@ -170,28 +170,36 @@ async def ingest_worker(profile: Profile, pub: Publisher, stop: asyncio.Event, s
             pass
 
 
+def pick_tag_ids(profile: Profile, rng: random.Random, n: int) -> list[int]:
+    start = profile.ingest.tag_start
+    count = profile.ingest.tag_count
+    take = min(max(n, 1), count)
+    if take >= count:
+        return list(range(start, start + count))
+    return rng.sample(range(start, start + count), take)
+
+
 async def query_worker_live(profile: Profile, pub: Publisher, stop: asyncio.Event, stats: dict) -> None:
     spec = profile.query
     interval = spec.workers / spec.rate if spec.rate > 0 else 1.0
     rng = random.Random()
     while not stop.is_set():
         item = pick_mix(spec.mix, rng)
-        tag_ids = [pick_tag(profile, rng)]
+        tag_ids = pick_tag_ids(profile, rng, spec.tags_per_request)
         now = datetime.now(timezone.utc)
         try:
             if item.op == "locf":
-                await pub.read({"mode": "locf", "tag_ids": tag_ids, "at": rfc3339(now)})
+                await pub.read({"requestKey": "locf", "tagsId": tag_ids, "exact": rfc3339(now)})
             else:
                 start = now - parse_duration(item.window)
-                payload = {
-                    "mode": item.op,
-                    "tag_ids": tag_ids,
-                    "from": rfc3339(start),
-                    "to": rfc3339(now),
-                }
-                if item.op == "sample":
-                    payload["step"] = item.step
-                await pub.read(payload)
+                await pub.read(
+                    {
+                        "requestKey": item.op,
+                        "tagsId": tag_ids,
+                        "old": rfc3339(start),
+                        "young": rfc3339(now),
+                    }
+                )
             stats["queries"] += 1
         except Exception as exc:
             stats["query_errors"] += 1

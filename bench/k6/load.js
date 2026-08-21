@@ -94,16 +94,16 @@ function windowMs(raw) {
 export function writeBatch() {
   const now = new Date().toISOString();
   const batchSize = Math.max(Number(ingest.batch) || 1, 1);
-  const samples = [];
+  const items = [];
   for (let i = 0; i < batchSize; i += 1) {
-    samples.push({
-      ts: now,
-      tag_id: pickTag(),
+    items.push({
+      date: now,
+      id: pickTag(),
       value: Math.random() * 100,
       quality: 192,
     });
   }
-  const res = http.post(`${BASE}/v1/write`, JSON.stringify({ samples }), {
+  const res = http.put(`${BASE}/api/values`, JSON.stringify(items), {
     headers: { "Content-Type": "application/json" },
   });
   writeMs.add(res.timings.duration);
@@ -116,8 +116,8 @@ export function runQuery() {
   const to = new Date();
   if (item.op === "locf" || item.op === "latest") {
     const res = http.post(
-      `${BASE}/v1/read`,
-      JSON.stringify({ mode: "locf", tag_ids: tagIds, at: to.toISOString() }),
+      `${BASE}/api/values`,
+      JSON.stringify({ tagsId: tagIds, exact: to.toISOString() }),
       { headers: { "Content-Type": "application/json" } },
     );
     queryMs.add(res.timings.duration);
@@ -125,18 +125,15 @@ export function runQuery() {
     return;
   }
   const from = new Date(to.getTime() - windowMs(item.window));
-  const payload = {
-    mode: item.op === "query" ? "range" : item.op,
-    tag_ids: tagIds,
-    from: from.toISOString(),
-    to: to.toISOString(),
-  };
-  if (payload.mode === "sample") {
-    payload.step = item.step || "1m";
-  }
-  const res = http.post(`${BASE}/v1/read`, JSON.stringify(payload), {
-    headers: { "Content-Type": "application/json" },
-  });
+  const res = http.post(
+    `${BASE}/api/values`,
+    JSON.stringify({
+      tagsId: tagIds,
+      old: from.toISOString(),
+      young: to.toISOString(),
+    }),
+    { headers: { "Content-Type": "application/json" } },
+  );
   queryMs.add(res.timings.duration);
   check(res, { queried: (r) => r.status === 200 });
 }

@@ -41,7 +41,7 @@ QuestDB — HTTP `/write`, хотя есть ILP `:9009`, VM — prometheus impo
 
 - Один OpenAPI на все API. Диалекты не плодить.
 - Запись: `ts` UTC, `tag_id` uint32, `value` float, `quality` OPC DA (192 = Good).
-- locf и range — в адаптере хранилища. sample и twavg — в API из результата range.
+- locf и range — в адаптере хранилища. Stretch и агрегаты в API нет.
 - NATS: `prism.samples`. Новый store оборачивать в `Observed`, чтобы сразу были `storage_*` p95.
 
 ## Git

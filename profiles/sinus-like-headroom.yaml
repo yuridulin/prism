@@ -1,0 +1,47 @@
+name: sinus-like-headroom
+description: >-
+  Hotter than sinus-like: same archive and read mix, live ingest 8k/s
+  (~220× prod INOPC, burst-class writer) and query offer 24/s. Use after
+  sinus-like if 2k/s did not separate the stores. Still not write-ceiling
+  (no readers, 200k offer).
+
+transport: http
+duration: 0
+
+archive:
+  enabled: true
+  span: 14d
+  batch: 2000
+  workers: 4
+  tags:
+    - { class: minute, start: 1, count: 600, period: 1m }
+    - { class: hour, start: 601, count: 400, period: 1h }
+
+ingest:
+  enabled: true
+  rate: 8000
+  batch: 200
+  workers: 2
+  tag_start: 1
+  tag_count: 1000
+  good_ratio: 0.98
+  out_of_order: 0.0
+  late_ms: 0
+
+query:
+  enabled: true
+  rate: 24
+  workers: 12
+  rng_seed: 42
+  tags_per_request: 15
+  tag_sets:
+    - { class: minute, size: 15 }
+    - { class: minute, size: 1 }
+    - { class: hour, size: 15 }
+  at_offsets: [0s, 0s, 0s, 1d, 7d, 14d]
+  end_offsets: [0s]
+  mix:
+    - { op: locf, weight: 6 }
+    - { op: range, weight: 1, window: 1d }
+    - { op: range, weight: 1, window: 7d }
+    - { op: range, weight: 1, window: 14d }

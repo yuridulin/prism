@@ -98,6 +98,7 @@ class QuerySpec:
     rate: float = 0
     workers: int = 1
     rng_seed: int = 42
+    tags_per_request: int = 1
     mix: tuple[QueryMixItem, ...] = ()
     tag_sets: tuple[TagSetSpec, ...] = ()
     at_offsets: tuple[str, ...] = ()
@@ -115,16 +116,14 @@ class QueryCall:
     label: str = ""
 
     def payload(self) -> dict:
-        body: dict = {"mode": self.op, "tag_ids": list(self.tag_ids)}
+        body: dict = {"requestKey": self.label, "tagsId": list(self.tag_ids)}
         if self.op == "locf":
             assert self.at is not None
-            body["at"] = rfc3339(self.at)
+            body["exact"] = rfc3339(self.at)
             return body
         assert self.start is not None and self.end is not None
-        body["from"] = rfc3339(self.start)
-        body["to"] = rfc3339(self.end)
-        if self.op == "sample":
-            body["step"] = self.step or "1m"
+        body["old"] = rfc3339(self.start)
+        body["young"] = rfc3339(self.end)
         return body
 
 
@@ -282,6 +281,7 @@ def _parse_query(raw: dict) -> QuerySpec:
         rate=float(raw.get("rate") or 0),
         workers=max(int(raw.get("workers") or 1), 1),
         rng_seed=int(raw.get("rng_seed") or 42),
+        tags_per_request=max(int(raw.get("tags_per_request") or 1), 1),
         mix=tuple(mix),
         tag_sets=tuple(tag_sets),
         at_offsets=at_offsets,
@@ -422,6 +422,7 @@ def to_k6_env(profile: Profile) -> dict:
             "rate": profile.query.rate,
             "workers": profile.query.workers,
             "rng_seed": profile.query.rng_seed,
+            "tags_per_request": profile.query.tags_per_request,
             "mix": [{"op": i.op, "weight": i.weight, "window": i.window, "step": i.step} for i in profile.query.mix],
             "tag_sets": [{"class": i.name, "size": i.size} for i in profile.query.tag_sets],
             "at_offsets": list(profile.query.at_offsets),

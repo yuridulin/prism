@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -16,12 +16,12 @@ from app.models import (
     CONTRACT,
     OPS,
     Meta,
-    ReadRequest,
-    ReadResult,
     TagList,
     TagWriteRequest,
     TagWriteResponse,
-    WriteRequest,
+    ValuesRequest,
+    ValuesResponse,
+    WriteItem,
     WriteResponse,
 )
 from app.nats_consumer import run_consumer
@@ -89,17 +89,22 @@ async def metrics_endpoint() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@app.get("/v1/meta", response_model=Meta)
-async def meta() -> Meta:
+def _meta() -> Meta:
     return Meta(backend="python", storage=store.name, storages=SUPPORTED, contract=CONTRACT, ops=OPS)
 
 
-@app.get("/v1/tags", response_model=TagList)
+@app.get("/api/meta", response_model=Meta)
+@app.get("/v1/meta", response_model=Meta)
+async def meta() -> Meta:
+    return _meta()
+
+
+@app.get("/api/tags", response_model=TagList)
 async def list_tags() -> TagList:
     return TagList(tags=await store.list_tags())
 
 
-@app.post("/v1/tags", response_model=TagWriteResponse)
+@app.post("/api/tags", response_model=TagWriteResponse)
 async def upsert_tags(req: TagWriteRequest) -> TagWriteResponse:
     if not req.tags:
         raise HTTPException(status_code=400, detail="tags is required")
@@ -107,71 +112,40 @@ async def upsert_tags(req: TagWriteRequest) -> TagWriteResponse:
     return TagWriteResponse(upserted=len(req.tags))
 
 
-@app.post("/v1/write", response_model=WriteResponse)
-async def write_samples(req: WriteRequest) -> WriteResponse:
-    if not req.samples:
-        raise HTTPException(status_code=400, detail="samples is required")
+@app.put("/api/values", response_model=WriteResponse)
+async def write_values(items: list[WriteItem]) -> WriteResponse:
+    if not items:
+        raise HTTPException(status_code=400, detail="values array is required")
     now = datetime.now(timezone.utc)
-    for s in req.samples:
-        if s.ts.tzinfo is None:
-            s.ts = s.ts.replace(tzinfo=timezone.utc)
-        if s.ts.timestamp() == 0:
-            s.ts = now
+    try:
+        samples = [item.to_sample(now) for item in items]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     with track() as elapsed:
         try:
-            await store.write(req.samples)
+            await store.write(samples)
         except Exception as exc:
             observe_backend(store.name, "write", "http", 0, elapsed(), exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    observe_backend(store.name, "write", "http", len(req.samples), elapsed())
-    return WriteResponse(written=len(req.samples))
+    observe_backend(store.name, "write", "http", len(samples), elapsed())
+    return WriteResponse(written=len(samples))
 
 
-@app.post("/v1/read", response_model=ReadResult)
-async def read_post(req: ReadRequest) -> ReadResult:
-    return await _read(req)
-
-
-@app.post("/v1/locf", response_model=ReadResult)
-async def locf_post(req: ReadRequest) -> ReadResult:
-    req.mode = "locf"
-    return await _read(req)
-
-
-@app.post("/v1/range", response_model=ReadResult)
-async def range_post(req: ReadRequest) -> ReadResult:
-    req.mode = "range"
-    return await _read(req)
-
-
-async def _read(req: ReadRequest) -> ReadResult:
-    if not req.tag_ids:
-        raise HTTPException(status_code=400, detail="tag_ids is required")
-    step = _parse_step(req.step)
+@app.post("/api/values", response_model=ValuesResponse)
+async def read_values(req: ValuesRequest) -> ValuesResponse:
+    if not req.tags_id:
+        raise HTTPException(status_code=400, detail="tagsId is required")
+    mode = req.mode()
     with track() as elapsed:
         try:
-            if req.mode == "locf":
-                if req.at is None:
-                    raise HTTPException(status_code=400, detail="at is required")
-                raw = await store.locf(req.tag_ids, req.at)
+            if mode == "range":
+                raw = await store.range(req.tags_id, req.old, req.young)
             else:
-                if req.from_ is None or req.to is None:
-                    raise HTTPException(status_code=400, detail="from and to are required")
-                raw = await store.range(req.tag_ids, req.from_, req.to)
+                raw = await store.locf(req.tags_id, req.at())
         except HTTPException:
             raise
         except Exception as exc:
-            observe_backend(store.name, req.mode, "http", 0, elapsed(), exc)
+            observe_backend(store.name, mode, "http", 0, elapsed(), exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    observe_backend(store.name, req.mode, "http", len(raw), elapsed())
-    return assemble(req, raw, step)
-
-
-def _parse_step(raw: str) -> timedelta:
-    units = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
-    for suffix, mul in units.items():
-        if raw.endswith(suffix):
-            return timedelta(seconds=float(raw[: -len(suffix)]) * mul)
-    if raw.isdigit():
-        return timedelta(seconds=int(raw))
-    raise HTTPException(status_code=400, detail="invalid step")
+    observe_backend(store.name, mode, "http", len(raw), elapsed())
+    return assemble(req, raw)

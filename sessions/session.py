@@ -31,10 +31,10 @@ API_READY = {
     "rust": "http://127.0.0.1:8084/readyz",
 }
 API_META = {
-    "go": "http://127.0.0.1:8081/v1/meta",
-    "python": "http://127.0.0.1:8082/v1/meta",
-    "csharp": "http://127.0.0.1:8083/v1/meta",
-    "rust": "http://127.0.0.1:8084/v1/meta",
+    "go": "http://127.0.0.1:8081/api/meta",
+    "python": "http://127.0.0.1:8082/api/meta",
+    "csharp": "http://127.0.0.1:8083/api/meta",
+    "rust": "http://127.0.0.1:8084/api/meta",
 }
 
 

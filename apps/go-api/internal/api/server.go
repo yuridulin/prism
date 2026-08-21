@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -31,13 +33,12 @@ func New(st store.Store) *Server {
 	r.Get("/healthz", s.health)
 	r.Get("/readyz", s.ready)
 	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/api/meta", s.meta)
 	r.Get("/v1/meta", s.meta)
-	r.Get("/v1/tags", s.listTags)
-	r.Post("/v1/tags", s.upsertTags)
-	r.Post("/v1/write", s.write)
-	r.Post("/v1/read", s.read)
-	r.Post("/v1/locf", s.locf)
-	r.Post("/v1/range", s.rangeOnly)
+	r.Get("/api/tags", s.listTags)
+	r.Post("/api/tags", s.upsertTags)
+	r.Post("/api/values", s.readValues)
+	r.Put("/api/values", s.write)
 	s.mux = r
 	return s
 }
@@ -68,23 +69,44 @@ func (s *Server) meta(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) write(w http.ResponseWriter, r *http.Request) {
-	var req model.WriteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
-		return
+func decodeWriteItems(r io.Reader) ([]model.WriteItem, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
 	}
-	if len(req.Samples) == 0 {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "samples is required")
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return nil, errEmpty
+	}
+	if raw[0] == '[' {
+		var items []model.WriteItem
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return nil, err
+		}
+		return items, nil
+	}
+	var wrap model.SamplesWrap
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, err
+	}
+	return wrap.Samples, nil
+}
+
+var errEmpty = io.EOF
+
+func (s *Server) write(w http.ResponseWriter, r *http.Request) {
+	items, err := decodeWriteItems(r.Body)
+	if err != nil || len(items) == 0 {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "values array is required")
 		return
 	}
 	now := time.Now().UTC()
-	samples := make([]model.Sample, 0, len(req.Samples))
-	for _, raw := range req.Samples {
+	samples := make([]model.Sample, 0, len(items))
+	for _, raw := range items {
 		samples = append(samples, raw.Normalize(now))
 	}
 	start := time.Now()
-	err := s.store.Write(r.Context(), samples)
+	err = s.store.Write(r.Context(), samples)
 	metrics.ObserveBackend(s.store.Name(), "write", "http", len(samples), time.Since(start), err)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeStorageError, err.Error())
@@ -93,70 +115,34 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.WriteResponse{Written: len(samples)})
 }
 
-func (s *Server) locf(w http.ResponseWriter, r *http.Request) {
-	var req model.ReadRequest
+func (s *Server) readValues(w http.ResponseWriter, r *http.Request) {
+	var req model.ValuesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
 		return
 	}
-	req.Mode = "locf"
-	s.serveRead(w, r, req)
-}
-
-func (s *Server) rangeOnly(w http.ResponseWriter, r *http.Request) {
-	var req model.ReadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
+	if len(req.TagsID) == 0 {
+		writeError(w, http.StatusBadRequest, codeInvalidRequest, "tagsId is required")
 		return
 	}
-	req.Mode = "range"
-	s.serveRead(w, r, req)
-}
-
-func (s *Server) read(w http.ResponseWriter, r *http.Request) {
-	var req model.ReadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "invalid json")
-		return
-	}
-	s.serveRead(w, r, req)
-}
-
-func (s *Server) serveRead(w http.ResponseWriter, r *http.Request, req model.ReadRequest) {
-	if !model.ValidMode(req.Mode) {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "mode must be locf, range, sample or twavg")
-		return
-	}
-	if len(req.TagIDs) == 0 {
-		writeError(w, http.StatusBadRequest, codeInvalidRequest, "tag_ids is required")
-		return
-	}
+	mode := req.Mode()
+	start := time.Now()
 	var (
 		raw []model.Sample
 		err error
 	)
-	start := time.Now()
-	switch req.Mode {
-	case "locf":
-		if req.At.IsZero() {
-			writeError(w, http.StatusBadRequest, codeInvalidRequest, "at is required")
-			return
-		}
-		raw, err = s.store.Locf(r.Context(), req.TagIDs, req.At.UTC())
+	switch mode {
+	case "range":
+		raw, err = s.store.Range(r.Context(), req.TagsID, req.Old.UTC(), req.Young.UTC())
 	default:
-		if req.From.IsZero() || req.To.IsZero() {
-			writeError(w, http.StatusBadRequest, codeInvalidRequest, "from and to are required")
-			return
-		}
-		raw, err = s.store.Range(r.Context(), req.TagIDs, req.From.UTC(), req.To.UTC())
+		raw, err = s.store.Locf(r.Context(), req.TagsID, req.At())
 	}
-	items := len(raw)
-	metrics.ObserveBackend(s.store.Name(), req.Mode, "http", items, time.Since(start), err)
+	metrics.ObserveBackend(s.store.Name(), mode, "http", len(raw), time.Since(start), err)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeStorageError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, model.Assemble(req.Mode, req, raw))
+	writeJSON(w, http.StatusOK, model.Assemble(req, raw))
 }
 
 func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {

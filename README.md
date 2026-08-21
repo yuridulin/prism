@@ -2,18 +2,17 @@
 
 Стенд сравнения time-series стеков под задачу **каталога тегов** и append-only рядов.
 
-Запись: `ts` (UTC), `tag_id` (uint32), `value` (float), `quality` (OPC DA uint16, 192 = Good).
+Запись: `date` (UTC), `id` (uint32), `value` (float), `quality` (OPC DA uint16, 192 = Good).
 
-Чтение:
+HTTP как у Datalake `/api/values`, без массива запросов и без `Func`/`Resolution`:
 
-| Режим | Смысл |
+| Вызов | Смысл |
 | --- | --- |
-| `locf` | last observation carried forward на момент `at` |
-| `range` | locf на `from` + все точки `(from, to]` |
-| `sample` | range, затем сетка с протяжкой LOCF |
-| `twavg` | range, затем средневзвешенное по времени |
+| `POST /api/values` + `exact` | LOCF на момент (current / ExactLocf) |
+| `POST /api/values` + `old`/`young` | locf на `old` + сырые точки `(old, young]` |
+| `PUT /api/values` | пачка точек `{ id, value, date, quality }` |
 
-Первые два — основные. `sample` и `twavg` считаются в API-слое из `range`, чтобы сравнивать хранилища честно.
+Stretch и агрегаты в API нет — сравниваются только locf и raw range.
 
 | Слой | Варианты |
 | --- | --- |
@@ -33,10 +32,10 @@ docker compose up -d --build go-api questdb nats prometheus
 ```
 
 ```powershell
-curl http://localhost:8081/v1/meta
-curl -X POST http://localhost:8081/v1/write -H "Content-Type: application/json" -d "{\"samples\":[{\"tag_id\":1,\"value\":42.1,\"quality\":192}]}"
-curl -X POST http://localhost:8081/v1/locf -H "Content-Type: application/json" -d "{\"tag_ids\":[1],\"at\":\"2026-08-18T18:00:00Z\"}"
-curl -X POST http://localhost:8081/v1/range -H "Content-Type: application/json" -d "{\"tag_ids\":[1],\"from\":\"2026-08-18T17:00:00Z\",\"to\":\"2026-08-18T18:00:00Z\"}"
+curl http://localhost:8081/api/meta
+curl -X PUT http://localhost:8081/api/values -H "Content-Type: application/json" -d "[{\"id\":1,\"value\":42.1,\"quality\":192}]"
+curl -X POST http://localhost:8081/api/values -H "Content-Type: application/json" -d "{\"tagsId\":[1],\"exact\":\"2026-08-18T18:00:00Z\"}"
+curl -X POST http://localhost:8081/api/values -H "Content-Type: application/json" -d "{\"tagsId\":[1],\"old\":\"2026-08-18T17:00:00Z\",\"young\":\"2026-08-18T18:00:00Z\"}"
 ```
 
 - Grafana: http://localhost:3000 (`admin` / `prism`)
@@ -97,13 +96,11 @@ query:
 ## Контракт
 
 ```
-POST /v1/write   { "samples": [{ ts, tag_id, value, quality }] }
-POST /v1/read    { mode, tag_ids, at? | from?, to?, step? }
-POST /v1/locf    alias mode=locf
-POST /v1/range   alias mode=range
-GET  /v1/tags    каталог
-POST /v1/tags    upsert каталога
-GET  /v1/meta
+PUT  /api/values   [{ id, value, date?, quality? }]
+POST /api/values   { requestKey?, tagsId, exact? | old?, young? }
+GET  /api/tags     каталог
+POST /api/tags     upsert каталога
+GET  /api/meta
 ```
 
 `quality`: OPC DA word. 192 Good, 64 Uncertain, 0 Bad.
@@ -130,7 +127,7 @@ python sessions/run.py compare <id>    # печать scorecard
 
 ## Метрики
 
-Те же три слоя: `api`, `backend` (`write` / `locf` / `range` / `sample` / `twavg`), `storage`.
+Те же три слоя: `api`, `backend` (`write` / `locf` / `range`), `storage`.
 Новый адаптер оборачивается в `Observed` и сразу пишет storage-метрики.
 
 ## Порты

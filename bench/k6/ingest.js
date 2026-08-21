@@ -17,17 +17,15 @@ export const options = {
 };
 
 export default function () {
-  const payload = JSON.stringify({
-    samples: [
-      {
-        ts: new Date().toISOString(),
-        tag_id: 1,
-        value: Math.random() * 100,
-        quality: 192,
-      },
-    ],
-  });
-  const res = http.post(`${BASE}/v1/write`, payload, {
+  const payload = JSON.stringify([
+    {
+      date: new Date().toISOString(),
+      id: 1,
+      value: Math.random() * 100,
+      quality: 192,
+    },
+  ]);
+  const res = http.put(`${BASE}/api/values`, payload, {
     headers: { "Content-Type": "application/json" },
   });
   check(res, { written: (r) => r.status === 200 });

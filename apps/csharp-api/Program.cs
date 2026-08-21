@@ -86,6 +86,14 @@ app.MapGet("/readyz", async (CancellationToken ct) =>
 });
 app.MapMetrics();
 
+app.MapGet("/api/meta", () => new Meta
+{
+    Backend = "csharp",
+    Storage = store.Name,
+    Storages = AppConfig.Storages,
+    Contract = Contract.Version,
+    Ops = Contract.Ops
+});
 app.MapGet("/v1/meta", () => new Meta
 {
     Backend = "csharp",
@@ -95,7 +103,7 @@ app.MapGet("/v1/meta", () => new Meta
     Ops = Contract.Ops
 });
 
-app.MapGet("/v1/tags", async (CancellationToken ct) =>
+app.MapGet("/api/tags", async (CancellationToken ct) =>
 {
     try
     {
@@ -108,7 +116,7 @@ app.MapGet("/v1/tags", async (CancellationToken ct) =>
     }
 });
 
-app.MapPost("/v1/tags", async (TagWriteRequest? req, CancellationToken ct) =>
+app.MapPost("/api/tags", async (TagWriteRequest? req, CancellationToken ct) =>
 {
     if (req?.Tags is null || req.Tags.Count == 0)
     {
@@ -126,15 +134,15 @@ app.MapPost("/v1/tags", async (TagWriteRequest? req, CancellationToken ct) =>
     }
 });
 
-app.MapPost("/v1/write", async (WriteRequest? req, CancellationToken ct) =>
+app.MapPut("/api/values", async (List<WriteSample>? items, CancellationToken ct) =>
 {
-    if (req?.Samples is null || req.Samples.Count == 0)
+    if (items is null || items.Count == 0)
     {
-        return ApiErrors.Invalid("samples is required");
+        return ApiErrors.Invalid("values array is required");
     }
 
     var now = DateTimeOffset.UtcNow;
-    var samples = req.Samples.Select(s => s.Normalize(now)).ToList();
+    var samples = items.Select(s => s.Normalize(now)).ToList();
     var start = Stopwatch.StartNew();
     try
     {
@@ -149,25 +157,7 @@ app.MapPost("/v1/write", async (WriteRequest? req, CancellationToken ct) =>
     }
 });
 
-app.MapPost("/v1/read", (ReadRequest? req, CancellationToken ct) => ServeRead(store, req, ct));
-app.MapPost("/v1/locf", (ReadRequest? req, CancellationToken ct) =>
-{
-    if (req is not null)
-    {
-        req.Mode = "locf";
-    }
-
-    return ServeRead(store, req, ct);
-});
-app.MapPost("/v1/range", (ReadRequest? req, CancellationToken ct) =>
-{
-    if (req is not null)
-    {
-        req.Mode = "range";
-    }
-
-    return ServeRead(store, req, ct);
-});
+app.MapPost("/api/values", (ValuesRequest? req, CancellationToken ct) => ServeRead(store, req, ct));
 
 _ = NatsConsumer.RunAsync(cfg, store, json, app.Lifetime.ApplicationStopping);
 app.Lifetime.ApplicationStopped.Register(() => store.DisposeAsync().AsTask().GetAwaiter().GetResult());
@@ -177,57 +167,43 @@ app.Run();
 
 static void ConfigureJson(JsonSerializerOptions o)
 {
-    o.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+    o.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     o.PropertyNameCaseInsensitive = true;
     o.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 }
 
-static async Task<IResult> ServeRead(IStore store, ReadRequest? req, CancellationToken ct)
+static async Task<IResult> ServeRead(IStore store, ValuesRequest? req, CancellationToken ct)
 {
     if (req is null)
     {
         return ApiErrors.Invalid("invalid json");
     }
 
-    if (!ReadLogic.ValidMode(req.Mode))
+    if (req.TagsId.Count == 0)
     {
-        return ApiErrors.Invalid("mode must be locf, range, sample or twavg");
-    }
-
-    if (req.TagIds.Count == 0)
-    {
-        return ApiErrors.Invalid("tag_ids is required");
+        return ApiErrors.Invalid("tagsId is required");
     }
 
     IReadOnlyList<Sample> raw;
+    var mode = req.Mode();
     var start = Stopwatch.StartNew();
     try
     {
-        if (req.Mode == "locf")
+        if (mode == "range")
         {
-            if (req.At is null || req.At == default)
-            {
-                return ApiErrors.Invalid("at is required");
-            }
-
-            raw = await store.LocfAsync(req.TagIds, req.At.Value.ToUniversalTime(), ct);
+            raw = await store.RangeAsync(req.TagsId, req.Old!.Value.ToUniversalTime(), req.Young!.Value.ToUniversalTime(), ct);
         }
         else
         {
-            if (req.From is null || req.From == default || req.To is null || req.To == default)
-            {
-                return ApiErrors.Invalid("from and to are required");
-            }
-
-            raw = await store.RangeAsync(req.TagIds, req.From.Value.ToUniversalTime(), req.To.Value.ToUniversalTime(), ct);
+            raw = await store.LocfAsync(req.TagsId, req.At(), ct);
         }
     }
     catch (Exception ex)
     {
-        PrismMetrics.ObserveBackend(store.Name, req.Mode, "http", 0, start.Elapsed, ex);
+        PrismMetrics.ObserveBackend(store.Name, mode, "http", 0, start.Elapsed, ex);
         return ApiErrors.Storage(ex.Message);
     }
 
-    PrismMetrics.ObserveBackend(store.Name, req.Mode, "http", raw.Count, start.Elapsed, null);
-    return Results.Json(ReadLogic.Assemble(req.Mode, req, raw));
+    PrismMetrics.ObserveBackend(store.Name, mode, "http", raw.Count, start.Elapsed, null);
+    return Results.Json(ReadLogic.Assemble(req, raw));
 }
