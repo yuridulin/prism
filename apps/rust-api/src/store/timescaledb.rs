@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fmt::Write as _;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -22,11 +21,23 @@ struct SampleRow {
 }
 
 #[derive(FromRow)]
+struct RangeRow {
+    ts: DateTime<Utc>,
+    tag_id: i32,
+    value: f32,
+    quality: i16,
+    carried: bool,
+}
+
+#[derive(FromRow)]
 struct TagRow {
     id: i32,
     name: String,
     unit: String,
 }
+
+const PGCOPY_SIG: &[u8] = b"PGCOPY\n\xff\r\n\0";
+const PG_EPOCH_UNIX_MICROS: i64 = 946_684_800 * 1_000_000;
 
 impl Timescale {
     pub async fn connect(dsn: &str) -> Result<Self> {
@@ -109,7 +120,7 @@ fn merge_range(tag_ids: &[u32], head: Vec<Sample>, tail: Vec<Sample>) -> Vec<Sam
             extra.push(sample);
         }
     }
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(tag_ids.len() + extra.len());
     for id in tag_ids {
         if let Some(bucket) = buckets.get_mut(id) {
             out.append(bucket);
@@ -117,6 +128,27 @@ fn merge_range(tag_ids: &[u32], head: Vec<Sample>, tail: Vec<Sample>) -> Vec<Sam
     }
     out.extend(extra);
     out
+}
+
+fn encode_copy_binary(samples: &[Sample]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(19 + samples.len() * 36 + 2);
+    buf.extend_from_slice(PGCOPY_SIG);
+    buf.extend_from_slice(&0i32.to_be_bytes());
+    buf.extend_from_slice(&0i32.to_be_bytes());
+    for s in samples {
+        buf.extend_from_slice(&4i16.to_be_bytes());
+        buf.extend_from_slice(&8i32.to_be_bytes());
+        let micros = s.ts.timestamp_micros() - PG_EPOCH_UNIX_MICROS;
+        buf.extend_from_slice(&micros.to_be_bytes());
+        buf.extend_from_slice(&4i32.to_be_bytes());
+        buf.extend_from_slice(&(s.tag_id as i32).to_be_bytes());
+        buf.extend_from_slice(&4i32.to_be_bytes());
+        buf.extend_from_slice(&(s.value as f32).to_bits().to_be_bytes());
+        buf.extend_from_slice(&2i32.to_be_bytes());
+        buf.extend_from_slice(&(s.quality as i16).to_be_bytes());
+    }
+    buf.extend_from_slice(&(-1i16).to_be_bytes());
+    buf
 }
 
 #[async_trait]
@@ -136,20 +168,9 @@ impl Store for Timescale {
         }
         let mut conn = self.pool.acquire().await?;
         let mut copy = conn
-            .copy_in_raw("COPY samples (ts, tag_id, value, quality) FROM STDIN")
+            .copy_in_raw("COPY samples (ts, tag_id, value, quality) FROM STDIN WITH (FORMAT BINARY)")
             .await?;
-        let mut buf = String::with_capacity(samples.len() * 48);
-        for s in samples {
-            let _ = write!(
-                buf,
-                "{}\t{}\t{}\t{}\n",
-                s.ts.format("%Y-%m-%d %H:%M:%S%.6f+00"),
-                s.tag_id as i32,
-                s.value as f32,
-                s.quality as i16
-            );
-        }
-        copy.send(buf.as_bytes()).await?;
+        copy.send(encode_copy_binary(samples)).await?;
         copy.finish().await?;
         Ok(())
     }
@@ -165,17 +186,22 @@ impl Store for Timescale {
     }
 
     async fn range(&self, tag_ids: &[u32], from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Sample>> {
-        let mut head = self.locf(tag_ids, from).await?;
-        for sample in &mut head {
-            sample.carried = true;
-        }
         let ids: Vec<i32> = tag_ids.iter().map(|&id| id as i32).collect();
-        let rows = sqlx::query_as::<_, SampleRow>(
+        let rows = sqlx::query_as::<_, RangeRow>(
             r#"
-            SELECT ts, tag_id, value, quality
+            SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
+            FROM unnest($1::int4[]) AS t(tag_id)
+            CROSS JOIN LATERAL (
+                SELECT ts, tag_id, value, quality
+                FROM samples
+                WHERE samples.tag_id = t.tag_id AND ts <= $2
+                ORDER BY ts DESC
+                LIMIT 1
+            ) s
+            UNION ALL
+            SELECT ts, tag_id, value, quality, false
             FROM samples
             WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-            ORDER BY tag_id, ts
             "#,
         )
         .bind(&ids)
@@ -183,7 +209,22 @@ impl Store for Timescale {
         .bind(to)
         .fetch_all(&self.pool)
         .await?;
-        let tail = rows.into_iter().map(|r| to_sample(r, false)).collect();
+        let mut head = Vec::with_capacity(tag_ids.len());
+        let mut tail = Vec::with_capacity(rows.len());
+        for r in rows {
+            let sample = Sample {
+                ts: r.ts,
+                tag_id: r.tag_id as u32,
+                value: r.value as f64,
+                quality: r.quality as u16,
+                carried: r.carried,
+            };
+            if r.carried {
+                head.push(sample);
+            } else {
+                tail.push(sample);
+            }
+        }
         Ok(merge_range(tag_ids, head, tail))
     }
 

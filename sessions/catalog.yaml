@@ -160,34 +160,6 @@ sessions:
   - rust-influxdb
   - rust-victoriametrics
   path: sessions/20260821T113416-query-mix/session.yaml
-- id: 20260821T170551-query-mix
-  status: failed
-  created_at: '2026-08-21T17:05:51Z'
-  why: query-mix by-backend read after contract parity fix
-  profile: query-mix
-  duration: 5m
-  pairs:
-  - go-timescaledb
-  - go-clickhouse
-  - go-questdb
-  - go-influxdb
-  - go-victoriametrics
-  - python-timescaledb
-  - python-clickhouse
-  - python-questdb
-  - python-influxdb
-  - python-victoriametrics
-  - csharp-timescaledb
-  - csharp-clickhouse
-  - csharp-questdb
-  - csharp-influxdb
-  - csharp-victoriametrics
-  - rust-timescaledb
-  - rust-clickhouse
-  - rust-questdb
-  - rust-influxdb
-  - rust-victoriametrics
-  path: sessions/20260821T170551-query-mix/session.yaml
 - id: 20260821T172956-query-mix
   status: completed
   created_at: '2026-08-21T17:29:56Z'
@@ -216,57 +188,6 @@ sessions:
   - rust-influxdb
   - rust-victoriametrics
   path: sessions/20260821T172956-query-mix/session.yaml
-- id: 20260821T181504-query-mix
-  status: planned
-  created_at: '2026-08-21T18:15:04Z'
-  why: 3x3 sequential pairs, 3m read each on existing archive
-  profile: query-mix
-  duration: 3m
-  pairs:
-  - go-timescaledb
-  - go-questdb
-  - go-victoriametrics
-  - csharp-timescaledb
-  - csharp-questdb
-  - csharp-victoriametrics
-  - rust-timescaledb
-  - rust-questdb
-  - rust-victoriametrics
-  path: sessions/20260821T181504-query-mix/session.yaml
-- id: 20260821T181529-query-mix
-  status: planned
-  created_at: '2026-08-21T18:15:29Z'
-  why: test
-  profile: query-mix
-  duration: 3m
-  pairs:
-  - go-timescaledb
-  - go-questdb
-  - go-victoriametrics
-  - csharp-timescaledb
-  - csharp-questdb
-  - csharp-victoriametrics
-  - rust-timescaledb
-  - rust-questdb
-  - rust-victoriametrics
-  path: sessions/20260821T181529-query-mix/session.yaml
-- id: 20260821T181540-query-mix
-  status: planned
-  created_at: '2026-08-21T18:15:40Z'
-  why: test
-  profile: query-mix
-  duration: 3m
-  pairs:
-  - go-timescaledb
-  - go-questdb
-  - go-victoriametrics
-  - csharp-timescaledb
-  - csharp-questdb
-  - csharp-victoriametrics
-  - rust-timescaledb
-  - rust-questdb
-  - rust-victoriametrics
-  path: sessions/20260821T181540-query-mix/session.yaml
 - id: 20260821T181555-query-mix
   status: completed
   created_at: '2026-08-21T18:15:55Z'
@@ -301,3 +222,20 @@ sessions:
   - rust-questdb
   - rust-victoriametrics
   path: sessions/20260821T193755-query-mix/session.yaml
+- id: 20260822T042928-query-mix
+  status: completed
+  created_at: '2026-08-22T04:29:28Z'
+  why: query-mix rematch after adapter opts, sequential by-pair, keep archive
+  profile: query-mix
+  duration: 3m
+  pairs:
+  - go-timescaledb
+  - go-questdb
+  - go-victoriametrics
+  - csharp-timescaledb
+  - csharp-questdb
+  - csharp-victoriametrics
+  - rust-timescaledb
+  - rust-questdb
+  - rust-victoriametrics
+  path: sessions/20260822T042928-query-mix/session.yaml

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -49,4 +50,27 @@ func closeHTTP(resp *http.Response) {
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
+}
+
+func appendUint(buf *bytes.Buffer, v uint64) {
+	var tmp [20]byte
+	buf.Write(strconv.AppendUint(tmp[:0], v, 10))
+}
+
+func appendInt(buf *bytes.Buffer, v int64) {
+	var tmp [20]byte
+	buf.Write(strconv.AppendInt(tmp[:0], v, 10))
+}
+
+// ILP floats need a decimal (`1.0`, not `1`).
+func appendILPFloat(buf *bytes.Buffer, v float64) {
+	var tmp [32]byte
+	b := strconv.AppendFloat(tmp[:0], v, 'g', -1, 64)
+	buf.Write(b)
+	for _, c := range b {
+		if c == '.' || c == 'e' || c == 'E' {
+			return
+		}
+	}
+	buf.WriteString(".0")
 }

@@ -155,105 +155,127 @@ public sealed class QuestDbStore : IStore
     private async Task<List<Sample>> ExpSamples(CancellationToken ct, string query)
     {
         var url = _base + "/exp?query=" + Uri.EscapeDataString(query);
-        using var resp = await _http.GetAsync(url, ct);
+        using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         await StoreUtil.EnsureSuccess(resp, "questdb exp", ct);
-        var text = await resp.Content.ReadAsStringAsync(ct);
-        return ParseCsvSamples(text);
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+        return await ParseCsvSamples(reader, ct);
     }
 
-    private static List<Sample> ParseCsvSamples(string text)
+    private static async Task<List<Sample>> ParseCsvSamples(StreamReader reader, CancellationToken ct)
     {
         var output = new List<Sample>(4096);
-        using var reader = new StringReader(text);
-        var header = reader.ReadLine();
+        var header = await reader.ReadLineAsync(ct);
         if (header is null)
         {
             return output;
         }
 
-        var cols = SplitCsvLine(header);
-        var idx = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (var i = 0; i < cols.Length; i++)
-        {
-            idx[cols[i].Trim().Trim('"')] = i;
-        }
-
-        if (!idx.TryGetValue("ts", out var tsI) || !idx.TryGetValue("tag_id", out var tagI)
-            || !idx.TryGetValue("value", out var valI) || !idx.TryGetValue("quality", out var qI))
+        var tsI = -1;
+        var tagI = -1;
+        var valI = -1;
+        var qI = -1;
+        var cI = -1;
+        ParseCsvHeader(header, ref tsI, ref tagI, ref valI, ref qI, ref cI);
+        if (tsI < 0 || tagI < 0 || valI < 0 || qI < 0)
         {
             throw new InvalidOperationException("questdb csv columns " + header);
         }
 
-        idx.TryGetValue("carried", out var cI);
-        var hasCarried = idx.ContainsKey("carried");
-        while (reader.ReadLine() is { } line)
+        var hasCarried = cI >= 0;
+        while (await reader.ReadLineAsync(ct) is { } line)
         {
-            if (string.IsNullOrWhiteSpace(line))
+            if (line.Length == 0)
             {
                 continue;
             }
 
-            var row = SplitCsvLine(line);
-            if (tsI >= row.Length || tagI >= row.Length || valI >= row.Length || qI >= row.Length)
+            if (TryParseCsvSample(line, tsI, tagI, valI, qI, cI, hasCarried, out var sample))
             {
-                continue;
+                output.Add(sample);
             }
-
-            var sample = new Sample
-            {
-                Ts = ParseTs(row[tsI]),
-                TagId = (uint)AsFloat(row[tagI]),
-                Value = AsFloat(row[valI]),
-                Quality = (ushort)AsFloat(row[qI]),
-                Carried = hasCarried && cI < row.Length && AsBool(row[cI])
-            };
-            output.Add(sample);
         }
 
         return output;
     }
 
-    private static string[] SplitCsvLine(string line)
+    private static void ParseCsvHeader(string header, ref int tsI, ref int tagI, ref int valI, ref int qI, ref int cI)
     {
-        var cols = new List<string>();
-        var sb = new StringBuilder();
-        var inQuotes = false;
-        for (var i = 0; i < line.Length; i++)
+        var names = header.Split(',');
+        for (var i = 0; i < names.Length; i++)
         {
-            var c = line[i];
-            if (inQuotes)
+            var name = names[i].Trim().Trim('"');
+            if (name.Equals("ts", StringComparison.OrdinalIgnoreCase))
             {
-                if (c == '"' && i + 1 < line.Length && line[i + 1] == '"')
-                {
-                    sb.Append('"');
-                    i++;
-                }
-                else if (c == '"')
-                {
-                    inQuotes = false;
-                }
-                else
-                {
-                    sb.Append(c);
-                }
+                tsI = i;
             }
-            else if (c == '"')
+            else if (name.Equals("tag_id", StringComparison.OrdinalIgnoreCase))
             {
-                inQuotes = true;
+                tagI = i;
             }
-            else if (c == ',')
+            else if (name.Equals("value", StringComparison.OrdinalIgnoreCase))
             {
-                cols.Add(sb.ToString());
-                sb.Clear();
+                valI = i;
             }
-            else
+            else if (name.Equals("quality", StringComparison.OrdinalIgnoreCase))
             {
-                sb.Append(c);
+                qI = i;
+            }
+            else if (name.Equals("carried", StringComparison.OrdinalIgnoreCase))
+            {
+                cI = i;
             }
         }
+    }
 
-        cols.Add(sb.ToString());
-        return cols.ToArray();
+    private static bool TryParseCsvSample(string line, int tsI, int tagI, int valI, int qI, int cI, bool hasCarried, out Sample sample)
+    {
+        sample = null!;
+        Span<Range> parts = stackalloc Range[8];
+        var n = SplitCsv(line.AsSpan(), parts);
+        if (tsI >= n || tagI >= n || valI >= n || qI >= n)
+        {
+            return false;
+        }
+
+        var span = line.AsSpan();
+        sample = new Sample
+        {
+            Ts = ParseTsSpan(span[parts[tsI]].Trim().Trim('"')),
+            TagId = ParseUInt(span[parts[tagI]]),
+            Value = ParseDouble(span[parts[valI]]),
+            Quality = (ushort)ParseDouble(span[parts[qI]]),
+            Carried = hasCarried && cI < n && ParseBool(span[parts[cI]])
+        };
+        return true;
+    }
+
+    private static int SplitCsv(ReadOnlySpan<char> line, Span<Range> parts)
+    {
+        var n = 0;
+        var start = 0;
+        for (var i = 0; i < line.Length && n < parts.Length; i++)
+        {
+            if (line[i] != ',')
+            {
+                continue;
+            }
+
+            parts[n++] = start..i;
+            start = i + 1;
+        }
+
+        if (n < parts.Length)
+        {
+            parts[n++] = start..line.Length;
+        }
+
+        return n;
+    }
+
+    private static double ParseDouble(ReadOnlySpan<char> raw)
+    {
+        return double.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var n) ? n : 0;
     }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -287,6 +309,44 @@ public sealed class QuestDbStore : IStore
         }
 
         return output;
+    }
+
+    private static uint ParseUInt(ReadOnlySpan<char> raw)
+    {
+        raw = raw.Trim().Trim('"');
+        return uint.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0;
+    }
+
+    private static bool ParseBool(ReadOnlySpan<char> raw)
+    {
+        raw = raw.Trim();
+        return raw.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("t", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("1", StringComparison.Ordinal);
+    }
+
+    private static DateTimeOffset ParseTsSpan(ReadOnlySpan<char> raw)
+    {
+        if (DateTimeOffset.TryParseExact(
+                raw,
+                "yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var ts))
+        {
+            return ts;
+        }
+
+        if (DateTimeOffset.TryParse(
+                raw,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out ts))
+        {
+            return ts;
+        }
+
+        throw new InvalidOperationException($"questdb ts {raw}");
     }
 
     private static DateTimeOffset ParseTs(object? value) =>

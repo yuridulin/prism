@@ -16,7 +16,7 @@ Stretch и агрегаты в API нет — сравниваются толь�
 
 | Слой | Варианты |
 | --- | --- |
-| API | Go `:8081`, C# `:8083`, Rust `:8084` |
+| API | Go `:8081`, C# `:8083`, Rust `:8084` (Python `:8082` — вне матрицы) |
 | Storage | TimescaleDB, QuestDB, VictoriaMetrics |
 | Шина | NATS JetStream (`prism.samples`) |
 | Наблюдение | Prometheus + Grafana |
@@ -55,6 +55,7 @@ pip install -r sessions/requirements.txt
 python sessions/run.py new --why "LOCF и range на годовом архиве" --profile query-mix
 python sessions/run.py run
 python sessions/run.py new --why "Только QuestDB" --pairs go:questdb,csharp:questdb,rust:questdb --run
+python sessions/run.py preflight   # паритет locf/range: Go/C#/Rust на каждой БД
 ```
 
 ## Профили
@@ -123,7 +124,7 @@ sessions/<id>/pairs/<pair>/pair.yaml   # сырые цифры одной пар
 python sessions/run.py compare <id>    # печать scorecard
 ```
 
-Писать `conclude` имеет смысл уже поверх этих цифр: почему locf у QuestDB быстрее, а write у ClickHouse держит rate.
+Писать `conclude` имеет смысл уже поверх этих цифр: почему locf у QuestDB быстрее, а write у VM держит rate.
 
 Сводка прогонов записи/чтения и куда копать дальше: [sessions/REPORT-write-read-2026-08.md](sessions/REPORT-write-read-2026-08.md).
 
@@ -136,12 +137,12 @@ python sessions/run.py compare <id>    # печать scorecard
 
 | Сервис | Порт |
 | --- | --- |
-| Go / Python / C# / Rust | 8081 / 8082 / 8083 / 8084 |
+| Go / C# / Rust | 8081 / 8083 / 8084 |
 | QuestDB HTTP / PG / ILP | 9001 / 8812 / 9009 |
-| ClickHouse HTTP / native | 8123 / 9000 |
 | TimescaleDB | 5432 |
-| InfluxDB | 8086 |
 | VictoriaMetrics | 8428 |
 | NATS / monitor | 4222 / 8222 |
 | Grafana | 3000 |
 | Prometheus | 9090 |
+
+Вне матрицы (код в `apps/`, compose не поднимает): Python `:8082`, ClickHouse 8123/9000, InfluxDB 8086.

@@ -40,12 +40,20 @@
 Три чемпиона (Go / C# / Rust) соревнуются на `write-ceiling`.
 Побеждает выше ingest/s без ошибок; при равенстве — ниже write p95.
 
-Сейчас адаптеры наивные: Timescale — INSERT по строке (Rust даже по одному execute в транзакции),
-QuestDB — HTTP `/write`, хотя есть ILP `:9009`, VM — prometheus import.
+Текущие пути записи (уже не наивные INSERT):
 
-Разрешено: COPY / UNNEST, ILP TCP, raw Influx line, VM `/api/v1/import`, пулы, reuse HTTP, async insert.
+| Стор | Запись | Чтение |
+|------|--------|--------|
+| Timescale | PostgreSQL **COPY BINARY** (Go `CopyFrom`, C# `BeginBinaryImport`, Rust `FORMAT BINARY`) | locf: `unnest` + `LATERAL LIMIT 1`; range: один SQL (head + tail) |
+| QuestDB | **ILP TCP** `:9009`, пул соединений | locf: `LATEST ON` через `/exec`; range: `/exp` CSV **stream** |
+| VictoriaMetrics | Influx line `POST /write?precision=ns` (`prism_sample{tag_id,quality}`) | locf и range — один `/api/v1/export/csv` + выбор last/`(from,to]` в адаптере, stream |
+
+Ещё можно крутить: ILP builder без аллокаций, пулы, reuse HTTP, stream CSV, binary COPY. VM `/api/v1/import` — только если не ломает locf/range на `prism_sample{tag_id}`.
+
 Запрещено: менять OpenAPI, семантику locf/range, envelope, чужой `apps/<backend>`, генератор, профили.
 `/readyz` и Observed-метрики должны жить.
+
+Приёмка правок адаптера: `python sessions/run.py preflight` — locf/range совпадают у Go/C#/Rust на каждой БД. Сессии write-ceiling/query-mix — цифры эффективности, не ворота корректности.
 
 Каждый чемпион трогает только свой каталог: `apps/go-api`, `apps/csharp-api`, `apps/rust-api`. (`apps/python-api` — вне матрицы, см. выше.)
 

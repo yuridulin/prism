@@ -35,11 +35,6 @@ public static class ReadLogic
             output[i].Values.Add(rec);
         }
 
-        foreach (var tag in output)
-        {
-            tag.Values.Sort(static (a, b) => a.Date.CompareTo(b.Date));
-        }
-
         return output;
     }
 

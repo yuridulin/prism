@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use url::Url;
 
-use super::{append_ilp_float, Catalog, Result, Store, StoreError};
+use super::{append_ilp_float, foreach_line, http_client, Catalog, Result, Store, StoreError};
 use crate::model::{Sample, Tag};
 
 pub struct VictoriaMetrics {
@@ -21,11 +21,7 @@ impl VictoriaMetrics {
         Self {
             write_url: format!("{base}/write?precision=ns"),
             base,
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .pool_max_idle_per_host(16)
-                .build()
-                .expect("vm http client"),
+            client: http_client(),
             tags: Catalog::default(),
         }
     }
@@ -61,32 +57,32 @@ impl VictoriaMetrics {
             .append_pair("format", "tag_id,quality,__value__,__timestamp__:unix_ms");
         let resp = self.client.get(u).send().await?;
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
         if status.as_u16() >= 300 {
+            let text = resp.text().await.unwrap_or_default();
             return Err(StoreError::new(format!("vm export {status}: {text}")));
         }
 
         let mut best: HashMap<u32, Sample> = HashMap::new();
-        let mut mid = Vec::new();
-        for line in text.lines() {
-            if line.trim().is_empty() || line.starts_with("tag_id") {
-                continue;
+        let mut mid = Vec::with_capacity(4096);
+        foreach_line(resp, |line| {
+            if line.is_empty() || line.starts_with("tag_id") {
+                return Ok(());
             }
             let mut parts = line.split(',');
             let Some(id_raw) = parts.next() else {
-                continue;
+                return Ok(());
             };
             let Some(q_raw) = parts.next() else {
-                continue;
+                return Ok(());
             };
             let Some(val_raw) = parts.next() else {
-                continue;
+                return Ok(());
             };
             let Some(ts_raw) = parts.next() else {
-                continue;
+                return Ok(());
             };
             let Ok(id) = id_raw.parse::<u32>() else {
-                continue;
+                return Ok(());
             };
             let q: u16 = q_raw.parse().unwrap_or(0);
             let val: f64 = val_raw.parse().unwrap_or(0.0);
@@ -107,7 +103,7 @@ impl VictoriaMetrics {
                         },
                     );
                 }
-                continue;
+                return Ok(());
             }
             if with_mid && t <= to {
                 mid.push(Sample {
@@ -118,11 +114,10 @@ impl VictoriaMetrics {
                     carried: false,
                 });
             }
-        }
-        let seed = tag_ids
-            .iter()
-            .filter_map(|id| best.remove(id))
-            .collect();
+            Ok(())
+        })
+        .await?;
+        let seed = tag_ids.iter().filter_map(|id| best.remove(id)).collect();
         Ok((seed, mid))
     }
 }
@@ -186,4 +181,3 @@ impl Store for VictoriaMetrics {
         Ok(self.tags.list())
     }
 }
-

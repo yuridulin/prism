@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 
 use crate::metrics;
 use crate::model::{Sample, Tag};
@@ -165,9 +166,46 @@ pub fn append_ilp_float(buf: &mut String, v: f64) {
 pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
-        .pool_max_idle_per_host(16)
+        .pool_max_idle_per_host(32)
+        .tcp_nodelay(true)
+        .http1_only()
         .build()
         .expect("http client")
+}
+
+/// Call `on_line` for each complete CSV/text line from an HTTP body, without buffering the whole payload as a String.
+pub async fn foreach_line(
+    resp: reqwest::Response,
+    mut on_line: impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    let mut stream = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::with_capacity(64 << 10);
+    while let Some(chunk) = stream.next().await {
+        buf.extend_from_slice(&chunk?);
+        let mut start = 0;
+        while let Some(rel) = buf[start..].iter().position(|&b| b == b'\n') {
+            let end = start + rel;
+            let line = trim_cr(&buf[start..end]);
+            let text = std::str::from_utf8(line).map_err(|e| StoreError::new(e))?;
+            on_line(text)?;
+            start = end + 1;
+        }
+        if start > 0 {
+            buf.drain(..start);
+        }
+    }
+    if !buf.is_empty() {
+        let line = trim_cr(&buf);
+        let text = std::str::from_utf8(line).map_err(|e| StoreError::new(e))?;
+        if !text.is_empty() {
+            on_line(text)?;
+        }
+    }
+    Ok(())
+}
+
+fn trim_cr(line: &[u8]) -> &[u8] {
+    line.strip_suffix(&[b'\r']).unwrap_or(line)
 }
 
 pub async fn open(kind: &str, cfg: &crate::Config) -> Result<Observed> {

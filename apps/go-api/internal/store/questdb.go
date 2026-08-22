@@ -98,13 +98,13 @@ func (s *QuestDB) Write(ctx context.Context, samples []model.Sample) error {
 	for i := range samples {
 		p := &samples[i]
 		buf.WriteString("samples tag_id=")
-		buf.WriteString(strconv.FormatUint(uint64(p.TagID), 10))
+		appendUint(buf, uint64(p.TagID))
 		buf.WriteString("i,value=")
-		buf.WriteString(strconv.FormatFloat(p.Value, 'g', -1, 64))
+		appendILPFloat(buf, p.Value)
 		buf.WriteString(",quality=")
-		buf.WriteString(strconv.FormatUint(uint64(p.Quality), 10))
+		appendUint(buf, uint64(p.Quality))
 		buf.WriteString("i ")
-		buf.WriteString(strconv.FormatInt(p.TS.UTC().UnixNano(), 10))
+		appendInt(buf, p.TS.UTC().UnixNano())
 		buf.WriteByte('\n')
 	}
 	if err := s.sendILP(ctx, buf.Bytes()); err != nil {

@@ -442,3 +442,30 @@ ingest/s vs наивный baseline (×):
 7. Запись: не поднимать CPU генератора «чтобы догнать rematch». ClickHouse/Influx write — следующий рычаг только если §1–3 закрыты.
 
 Не делали и не обещаем этой заметкой: high-cardinality, burst, смешанный write+read, даунсэмпл range.
+
+---
+
+## 8. Адаптеры после 22.08 (код, не новый прогон)
+
+Поколение rematch (COPY / ILP TCP / VM `/write`) **уже в дереве**. Python / ClickHouse / Influx вне матрицы. Дальше правили не протокол, а дыры между API на одной БД.
+
+Что было в коде до этой правки (цифры — `20260821T095609` / `20260821T193755`):
+
+| Дыра | Было |
+|------|------|
+| go-questdb ingest | **75k/s** vs rust-questdb 114k (тот же ILP; Go собирал ILP через `FormatFloat`/`FormatUint`) |
+| csharp-questdb range | **861 ms** storage vs go 234 (весь `/exp` в строку + `SplitCsvLine`) |
+| rust-questdb locf | **42 ms** vs go 4.9 |
+| rust-vm locf | **31 ms** vs go 6.3 (`resp.text()` на весь export) |
+| rust-timescale write | текстовый `COPY FROM STDIN` с `format!` timestamp |
+| C# range JSON | api−storage ≈ 200 ms (`GroupByTag.Sort` + рефлексия STJ) |
+
+Что сделано в адаптерах (приёмка — `preflight` locf/range, не новая сессия):
+
+- Go ILP: `AppendUint`/`AppendFloat` в буфер, у целых есть `.0`
+- Rust Timescale: **binary COPY**; range — один SQL (LATERAL head + tail)
+- C#/Rust QuestDB и VM: stream CSV, без полного `ReadAsString`/`text()`
+- C# JSON source-gen; `GroupByTag` без лишнего `Sort`
+- Rust даты range без `format!` на каждую точку
+
+Исторические таблицы 4×5 выше не переписывать. Новые ingest/p95 — только после следующего write-ceiling / query-mix.

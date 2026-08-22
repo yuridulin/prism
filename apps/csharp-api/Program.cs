@@ -175,6 +175,7 @@ static void ConfigureJson(JsonSerializerOptions o)
     o.PropertyNameCaseInsensitive = true;
     o.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
     o.Converters.Add(new UtcRfc3339Converter());
+    o.TypeInfoResolverChain.Insert(0, PrismJsonContext.Default);
 }
 
 static async Task<IResult> ServeRead(IStore store, ValuesRequest? req, CancellationToken ct)

@@ -84,20 +84,42 @@ public sealed class TimescaleStore : IStore
 
     public async Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
     {
-        var head = await LocfAsync(tagIds, from, ct);
         await using var conn = await Open(ct);
         await using var cmd = new NpgsqlCommand(
             """
-            SELECT ts, tag_id, value, quality
+            SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
+            FROM unnest($1::int4[]) AS t(tag_id)
+            CROSS JOIN LATERAL (
+                SELECT ts, tag_id, value, quality
+                FROM samples
+                WHERE samples.tag_id = t.tag_id AND ts <= $2
+                ORDER BY ts DESC
+                LIMIT 1
+            ) s
+            UNION ALL
+            SELECT ts, tag_id, value, quality, false
             FROM samples
             WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-            ORDER BY tag_id, ts
             """, conn);
         cmd.Parameters.Add(new NpgsqlParameter { Value = StoreUtil.IntTags(tagIds) });
         cmd.Parameters.Add(new NpgsqlParameter { Value = from.UtcDateTime });
         cmd.Parameters.Add(new NpgsqlParameter { Value = to.UtcDateTime });
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var tail = await ScanSamples(reader, carried: false, ct);
+        var all = await ScanSamples(reader, carried: null, ct);
+        var head = new List<Sample>(tagIds.Count);
+        var tail = new List<Sample>(all.Count);
+        foreach (var sample in all)
+        {
+            if (sample.Carried)
+            {
+                head.Add(sample);
+            }
+            else
+            {
+                tail.Add(sample);
+            }
+        }
+
         return MergeRange(tagIds, head, tail);
     }
 
@@ -197,7 +219,7 @@ public sealed class TimescaleStore : IStore
 
     private static async Task<IReadOnlyList<Sample>> ScanSamples(NpgsqlDataReader reader, bool? carried, CancellationToken ct)
     {
-        var output = new List<Sample>();
+        var output = new List<Sample>(4096);
         while (await reader.ReadAsync(ct))
         {
             var sample = new Sample

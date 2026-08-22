@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use url::Url;
 
-use super::{append_ilp_float, http_client, Result, Store, StoreError};
+use super::{append_ilp_float, foreach_line, http_client, Result, Store, StoreError};
 use crate::model::{Sample, Tag};
 
 pub struct QuestDb {
@@ -100,14 +100,14 @@ impl QuestDb {
         u.query_pairs_mut().append_pair("query", query);
         let resp = self.client.get(u).send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
         if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
             return Err(StoreError::new(format!(
                 "questdb exp {status}: {}",
                 text.chars().take(500).collect::<String>()
             )));
         }
-        parse_qdb_csv(&text)
+        parse_qdb_csv_stream(resp).await
     }
 
     async fn exec_json<T>(&self, query: &str) -> Result<T>
@@ -175,55 +175,97 @@ fn as_f64(v: &serde_json::Value) -> f64 {
     }
 }
 
-fn parse_qdb_csv(text: &str) -> Result<Vec<Sample>> {
-    let mut lines = text.lines();
-    let Some(header) = lines.next() else {
-        return Ok(Vec::new());
-    };
-    let header = header.trim_end_matches('\r');
-    let cols: Vec<&str> = header.split(',').map(|s| s.trim()).collect();
+struct CsvCols {
+    ts: usize,
+    tag: usize,
+    val: usize,
+    quality: usize,
+    carried: Option<usize>,
+}
+
+async fn parse_qdb_csv_stream(resp: reqwest::Response) -> Result<Vec<Sample>> {
+    let mut cols: Option<CsvCols> = None;
+    let mut out = Vec::with_capacity(4096);
+    foreach_line(resp, |line| {
+        if line.is_empty() {
+            return Ok(());
+        }
+        if cols.is_none() {
+            cols = Some(parse_qdb_header(line)?);
+            return Ok(());
+        }
+        if let Some(sample) = parse_qdb_csv_row(cols.as_ref().unwrap(), line) {
+            out.push(sample);
+        }
+        Ok(())
+    })
+    .await?;
+    Ok(out)
+}
+
+fn parse_qdb_header(header: &str) -> Result<CsvCols> {
+    let names: Vec<&str> = header.split(',').map(|s| s.trim().trim_matches('"')).collect();
     let idx = |name: &str| {
-        cols.iter().position(|c| {
-            c.trim()
-                .trim_matches('"')
-                .eq_ignore_ascii_case(name)
-        })
+        names
+            .iter()
+            .position(|c| c.eq_ignore_ascii_case(name))
     };
-    let (Some(ts_i), Some(tag_i), Some(val_i), Some(q_i)) =
+    let (Some(ts), Some(tag), Some(val), Some(quality)) =
         (idx("ts"), idx("tag_id"), idx("value"), idx("quality"))
     else {
         return Err(StoreError::new(format!("questdb csv columns {header}")));
     };
-    let c_i = idx("carried");
-    let mut out = Vec::new();
-    for line in lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let row: Vec<&str> = line.split(',').collect();
-        if ts_i >= row.len() || tag_i >= row.len() || val_i >= row.len() || q_i >= row.len() {
-            continue;
-        }
-        let ts = match parse_qdb_ts_str(row[ts_i].trim().trim_matches('"')) {
-            Ok(ts) => ts,
-            Err(()) => continue,
-        };
-        let tag_id: u32 = row[tag_i].trim_matches('"').parse().unwrap_or(0);
-        let value: f64 = row[val_i].parse().unwrap_or(0.0);
-        let quality: u16 = row[q_i].parse::<f64>().unwrap_or(0.0) as u16;
-        let carried = c_i
-            .and_then(|i| row.get(i))
-            .map(|v| matches!(*v, "true" | "t" | "1"))
-            .unwrap_or(false);
-        out.push(Sample {
-            ts,
-            tag_id,
-            value,
-            quality,
-            carried,
-        });
+    Ok(CsvCols {
+        ts,
+        tag,
+        val,
+        quality,
+        carried: idx("carried"),
+    })
+}
+
+fn parse_qdb_csv_row(cols: &CsvCols, line: &str) -> Option<Sample> {
+    let mut fields = [""; 8];
+    let n = split_csv(line, &mut fields);
+    if cols.ts >= n || cols.tag >= n || cols.val >= n || cols.quality >= n {
+        return None;
     }
-    Ok(out)
+    let ts = parse_qdb_ts_str(fields[cols.ts].trim().trim_matches('"')).ok()?;
+    let tag_id: u32 = fields[cols.tag].trim_matches('"').parse().unwrap_or(0);
+    let value: f64 = fields[cols.val].parse().unwrap_or(0.0);
+    let quality: u16 = fields[cols.quality].parse::<f64>().unwrap_or(0.0) as u16;
+    let carried = cols
+        .carried
+        .filter(|&i| i < n)
+        .map(|i| matches!(fields[i], "true" | "t" | "1"))
+        .unwrap_or(false);
+    Some(Sample {
+        ts,
+        tag_id,
+        value,
+        quality,
+        carried,
+    })
+}
+
+fn split_csv<'a>(line: &'a str, out: &mut [&'a str]) -> usize {
+    let mut n = 0;
+    let mut start = 0;
+    let bytes = line.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b',' {
+            if n < out.len() {
+                out[n] = &line[start..i];
+                n += 1;
+            }
+            start = i + 1;
+        }
+    }
+    if n < out.len() {
+        out[n] = &line[start..];
+        n += 1;
+    }
+    n
 }
 
 fn parse_qdb_ts_str(s: &str) -> std::result::Result<DateTime<Utc>, ()> {

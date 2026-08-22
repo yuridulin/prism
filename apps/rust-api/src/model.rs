@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize, Serializer};
 
 pub const CONTRACT: &str = "v1.2";
@@ -113,7 +113,41 @@ fn serialize_utc<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error
 where
     S: Serializer,
 {
-    serializer.serialize_str(&dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    let mut buf = [0u8; 20];
+    let n = write_rfc3339_sec(&mut buf, dt);
+    serializer.serialize_str(std::str::from_utf8(&buf[..n]).unwrap_or("1970-01-01T00:00:00Z"))
+}
+
+fn write_rfc3339_sec(buf: &mut [u8; 20], dt: &DateTime<Utc>) -> usize {
+    let date = dt.date_naive();
+    let t = dt.time();
+    let y = date.year();
+    let m = date.month();
+    let d = date.day();
+    let hh = t.hour();
+    let mm = t.minute();
+    let ss = t.second();
+    buf[0] = b'0' + (y / 1000) as u8;
+    buf[1] = b'0' + ((y / 100) % 10) as u8;
+    buf[2] = b'0' + ((y / 10) % 10) as u8;
+    buf[3] = b'0' + (y % 10) as u8;
+    buf[4] = b'-';
+    buf[5] = b'0' + (m / 10) as u8;
+    buf[6] = b'0' + (m % 10) as u8;
+    buf[7] = b'-';
+    buf[8] = b'0' + (d / 10) as u8;
+    buf[9] = b'0' + (d % 10) as u8;
+    buf[10] = b'T';
+    buf[11] = b'0' + (hh / 10) as u8;
+    buf[12] = b'0' + (hh % 10) as u8;
+    buf[13] = b':';
+    buf[14] = b'0' + (mm / 10) as u8;
+    buf[15] = b'0' + (mm % 10) as u8;
+    buf[16] = b':';
+    buf[17] = b'0' + (ss / 10) as u8;
+    buf[18] = b'0' + (ss % 10) as u8;
+    buf[19] = b'Z';
+    20
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -65,10 +65,19 @@ const tsLocfUnboundedSQL = `
 	) s`
 
 const tsRangeSQL = `
-	SELECT ts, tag_id, value, quality
+	SELECT s.ts, s.tag_id, s.value, s.quality, true AS carried
+	FROM unnest($1::int4[]) AS t(tag_id)
+	CROSS JOIN LATERAL (
+		SELECT ts, tag_id, value, quality
+		FROM samples
+		WHERE samples.tag_id = t.tag_id AND ts <= $2
+		ORDER BY ts DESC
+		LIMIT 1
+	) s
+	UNION ALL
+	SELECT ts, tag_id, value, quality, false
 	FROM samples
-	WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3
-	ORDER BY tag_id, ts`
+	WHERE tag_id = ANY($1) AND ts > $2 AND ts <= $3`
 
 func (s *Timescale) Write(ctx context.Context, samples []model.Sample) error {
 	if len(samples) == 0 {
@@ -140,18 +149,23 @@ func (s *Timescale) locf(ctx context.Context, tagIDs []uint32, at time.Time, bou
 }
 
 func (s *Timescale) Range(ctx context.Context, tagIDs []uint32, from, to time.Time) ([]model.Sample, error) {
-	head, err := s.Locf(ctx, tagIDs, from)
-	if err != nil {
-		return nil, err
-	}
 	rows, err := s.pool.Query(ctx, tsRangeSQL, intTags(tagIDs), from.UTC(), to.UTC())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	tail, err := scanSamples(rows, false)
+	all, err := scanSamplesCarried(rows)
 	if err != nil {
 		return nil, err
+	}
+	head := make([]model.Sample, 0, len(tagIDs))
+	tail := make([]model.Sample, 0, len(all))
+	for i := range all {
+		if all[i].Carried {
+			head = append(head, all[i])
+		} else {
+			tail = append(tail, all[i])
+		}
 	}
 	return mergeCHRange(tagIDs, head, tail), nil
 }
@@ -202,7 +216,7 @@ func intTags(ids []uint32) []int32 {
 }
 
 func scanSamples(rows pgx.Rows, carried bool) ([]model.Sample, error) {
-	out := make([]model.Sample, 0, 16)
+	out := make([]model.Sample, 0, 32)
 	for rows.Next() {
 		var s model.Sample
 		var tag int32
@@ -213,6 +227,22 @@ func scanSamples(rows pgx.Rows, carried bool) ([]model.Sample, error) {
 		s.TagID = uint32(tag)
 		s.Quality = uint16(q)
 		s.Carried = carried
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func scanSamplesCarried(rows pgx.Rows) ([]model.Sample, error) {
+	out := make([]model.Sample, 0, 4096)
+	for rows.Next() {
+		var s model.Sample
+		var tag int32
+		var q int16
+		if err := rows.Scan(&s.TS, &tag, &s.Value, &q, &s.Carried); err != nil {
+			return nil, err
+		}
+		s.TagID = uint32(tag)
+		s.Quality = uint16(q)
 		out = append(out, s)
 	}
 	return out, rows.Err()

@@ -89,39 +89,25 @@ public sealed class VictoriaMetricsStore : IStore
             $"&start={exportStart.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}" +
             $"&end={exportEnd.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}" +
             "&format=" + Uri.EscapeDataString("tag_id,quality,__value__,__timestamp__:unix_ms");
-        using var resp = await _http.GetAsync(_base + "/api/v1/export/csv?" + qs, ct);
+        using var resp = await _http.GetAsync(_base + "/api/v1/export/csv?" + qs, HttpCompletionOption.ResponseHeadersRead, ct);
         await StoreUtil.EnsureSuccess(resp, "vm export", ct);
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var doc = new StreamReader(stream);
 
         var best = new Dictionary<uint, Sample>(tagIds.Count);
-        var mid = new List<Sample>();
+        var mid = new List<Sample>(4096);
         while (await doc.ReadLineAsync(ct) is { } line)
         {
-            if (string.IsNullOrWhiteSpace(line) || line.StartsWith("tag_id", StringComparison.Ordinal))
+            if (line.Length == 0 || line.StartsWith("tag_id", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            var parts = line.Split(',');
-            if (parts.Length < 4 || !uint.TryParse(parts[0], out var id))
+            if (!TryParseExportLine(line, out var id, out var quality, out var val, out var t))
             {
                 continue;
             }
 
-            ushort quality = 0;
-            if (int.TryParse(parts[1], out var q))
-            {
-                quality = (ushort)q;
-            }
-
-            double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var val);
-            if (!long.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms))
-            {
-                continue;
-            }
-
-            var t = DateTimeOffset.FromUnixTimeMilliseconds(ms);
             if (t <= from)
             {
                 if (!best.TryGetValue(id, out var prev) || t > prev.Ts)
@@ -166,6 +152,53 @@ public sealed class VictoriaMetricsStore : IStore
 
         seed.AddRange(mid);
         return seed;
+    }
+
+    private static bool TryParseExportLine(string line, out uint id, out ushort quality, out double val, out DateTimeOffset t)
+    {
+        id = 0;
+        quality = 0;
+        val = 0;
+        t = default;
+        var span = line.AsSpan();
+        var c1 = span.IndexOf(',');
+        if (c1 <= 0)
+        {
+            return false;
+        }
+
+        var rest = span[(c1 + 1)..];
+        var c2 = rest.IndexOf(',');
+        if (c2 <= 0)
+        {
+            return false;
+        }
+
+        var rest2 = rest[(c2 + 1)..];
+        var c3 = rest2.IndexOf(',');
+        if (c3 <= 0)
+        {
+            return false;
+        }
+
+        if (!uint.TryParse(span[..c1], NumberStyles.Integer, CultureInfo.InvariantCulture, out id))
+        {
+            return false;
+        }
+
+        if (int.TryParse(rest[..c2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var q))
+        {
+            quality = (ushort)q;
+        }
+
+        double.TryParse(rest2[..c3], NumberStyles.Float, CultureInfo.InvariantCulture, out val);
+        if (!long.TryParse(rest2[(c3 + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms))
+        {
+            return false;
+        }
+
+        t = DateTimeOffset.FromUnixTimeMilliseconds(ms);
+        return true;
     }
 
     public Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)

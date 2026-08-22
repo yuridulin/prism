@@ -65,13 +65,13 @@ func (s *VictoriaMetrics) Write(ctx context.Context, samples []model.Sample) err
 		// Canonical ILP for all APIs: empty measurement, quality is a label,
 		// field name prism_sample is the metric. Query match[] is prism_sample{tag_id}.
 		buf.WriteString(",tag_id=")
-		buf.WriteString(strconv.FormatUint(uint64(p.TagID), 10))
+		appendUint(buf, uint64(p.TagID))
 		buf.WriteString(",quality=")
-		buf.WriteString(strconv.FormatUint(uint64(p.Quality), 10))
+		appendUint(buf, uint64(p.Quality))
 		buf.WriteString(" prism_sample=")
-		buf.WriteString(strconv.FormatFloat(p.Value, 'g', -1, 64))
+		appendILPFloat(buf, p.Value)
 		buf.WriteByte(' ')
-		buf.WriteString(strconv.FormatInt(p.TS.UTC().UnixNano(), 10))
+		appendInt(buf, p.TS.UTC().UnixNano())
 		buf.WriteByte('\n')
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.writeURL, bytes.NewReader(buf.Bytes()))
