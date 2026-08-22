@@ -1,0 +1,82 @@
+profile: query-mix
+duration: 3m
+envelope:
+  api:
+    cpus: '1.0'
+    memory: 512M
+  storage:
+    cpus: '1.0'
+    memory: 1G
+  bus:
+    cpus: '0.50'
+    memory: 256M
+  observe:
+    cpus: '0.50'
+    memory: 512M
+  generator:
+    cpus: '1.0'
+    memory: 512M
+how: Одинаковый resource envelope. На каждый backend — параллельно N копий API (по
+  одной на storage), общие БД, один 5m query. Сначала тот же архив (год, частые и
+  редкие теги), затем только locf/range. Эффективнее та, что отвечает быстрее на locf
+  и range без ошибок и занимает меньше места тем же архивом. storage_*_p95 показывает,
+  где сидит задержка — в БД или в API. Seed в scorecard не входит.
+primary: read
+rows:
+- pair: csharp-timescaledb
+  status: completed
+  ingest_rate: null
+  seed_written: 4835600
+  seed_elapsed_seconds: 44.6
+  write_errors: 0
+  query_errors: 0
+  queries: 2454
+  write_p95_ms: null
+  locf_p95_ms: 4.955
+  range_p95_ms: 412.885
+  sample_p95_ms: null
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 4.955
+  storage_range_p95_ms: 412.885
+  storage_sample_p95_ms: null
+  api_p95_ms: 513.559
+  cpu_api: 0.16%
+  mem_api: 347.4MiB
+  cpu_storage: 0.02%
+  mem_storage: 362.4MiB
+  storage_bytes: 493502448
+  storage_mib: 470.6
+- pair: csharp-victoriametrics
+  status: completed
+  ingest_rate: null
+  seed_written: 4835600
+  seed_elapsed_seconds: 34.8
+  write_errors: 0
+  query_errors: 0
+  queries: 2677
+  write_p95_ms: null
+  locf_p95_ms: 11.077
+  range_p95_ms: 143.519
+  sample_p95_ms: null
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 11.077
+  storage_range_p95_ms: 143.519
+  storage_sample_p95_ms: null
+  api_p95_ms: 211.528
+  cpu_api: 0.01%
+  mem_api: 209.4MiB
+  cpu_storage: 0.46%
+  mem_storage: 172.4MiB
+  storage_bytes: 15635361
+  storage_mib: 14.9
+ranks:
+  locf_p95_ms:
+  - csharp-timescaledb
+  - csharp-victoriametrics
+  range_p95_ms:
+  - csharp-victoriametrics
+  - csharp-timescaledb
+  sample_p95_ms: []
+  storage_mib:
+  - csharp-victoriametrics
+  - csharp-timescaledb

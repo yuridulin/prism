@@ -124,6 +124,8 @@ class QueryCall:
         assert self.start is not None and self.end is not None
         body["old"] = rfc3339(self.start)
         body["young"] = rfc3339(self.end)
+        if self.op == "sample" and self.step:
+            body["resolution"] = self.step
         return body
 
 

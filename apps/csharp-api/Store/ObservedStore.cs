@@ -52,6 +52,9 @@ public sealed class ObservedStore(IStore inner) : IStore
     public Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default) =>
         Observe("range", () => inner.RangeAsync(tagIds, from, to, ct));
 
+    public Task<IReadOnlyList<Sample>> SampleAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, TimeSpan step, CancellationToken ct = default) =>
+        Observe("sample", () => inner.SampleAsync(tagIds, from, to, step, ct));
+
     public async Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)
     {
         var start = Stopwatch.StartNew();

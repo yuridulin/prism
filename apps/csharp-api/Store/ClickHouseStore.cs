@@ -119,6 +119,17 @@ public sealed class ClickHouseStore : IStore
         return MergeRange(tagIds, head, tail);
     }
 
+    public async Task<IReadOnlyList<Sample>> SampleAsync(
+        IReadOnlyList<uint> tagIds,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        TimeSpan step,
+        CancellationToken ct = default)
+    {
+        var raw = await RangeAsync(tagIds, from, to, ct);
+        return SampleStretch.Fill(tagIds, raw, from, to, step);
+    }
+
     private async Task<IReadOnlyList<Sample>> LocfQuery(IReadOnlyList<uint> tagIds, DateTimeOffset at, bool bounded, CancellationToken ct)
     {
         await using var conn = await Open(ct);

@@ -185,11 +185,59 @@ def update_compose_seed_flag(env_file: Path, skip_seed: bool) -> None:
 
 
 def recreate_api(backend: str, env_file: Path) -> None:
-    compose_checked(
-        ["up", "-d", "--build", "--force-recreate", "--no-deps", API_SERVICE[backend]],
-        env_file,
-        capture=False,
+    if os.environ.get("PRISM_HOST_API") == "1":
+        restart_host_api(env_file)
+        return
+    args = ["up", "-d", "--no-deps", API_SERVICE[backend]]
+    if os.environ.get("PRISM_NO_RECREATE") != "1":
+        args[2:2] = ["--build", "--force-recreate"]
+    elif os.environ.get("PRISM_NO_BUILD") != "1":
+        args[2:2] = ["--build"]
+    compose_checked(args, env_file, capture=False)
+
+
+def restart_host_api(env_file: Path) -> None:
+    """Run csharp-api on the host against published DB ports (Windows Docker proxy workaround)."""
+    storage = "timescaledb"
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        if line.startswith("CSHARP_API_STORAGE="):
+            storage = line.split("=", 1)[1].strip()
+            break
+    pid_path = ROOT / ".tmp-csharp-api.pid"
+    if pid_path.exists():
+        try:
+            pid = int(pid_path.read_text(encoding="utf-8").strip())
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"], check=False, capture_output=True)
+            else:
+                os.kill(pid, 15)
+        except (ValueError, OSError, ProcessLookupError):
+            pass
+        time.sleep(1)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PRISM_STORAGE": storage,
+            "HTTP_ADDR": "0.0.0.0:8083",
+            "POSTGRES_DSN": "postgres://prism:prism@127.0.0.1:5432/prism?sslmode=disable",
+            "VM_URL": "http://127.0.0.1:8428",
+            "NATS_URL": "nats://127.0.0.1:4222",
+            "NATS_SUBJECT": "prism.samples",
+            "DOTNET_gcServer": "0",
+        }
     )
+    dll = ROOT / ".tmp-csharp-out" / "Prism.Api.dll"
+    if not dll.exists():
+        raise SessionError(f"host API binary missing: {dll}")
+    proc = subprocess.Popen(
+        ["dotnet", str(dll)],
+        cwd=str(dll.parent),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    pid_path.write_text(str(proc.pid), encoding="utf-8")
+    time.sleep(2)
 
 
 def ensure_backend_stack(session: dict, backend: str, env_file: Path) -> None:
@@ -242,7 +290,7 @@ def run_session_preflight(session: dict) -> None:
     )
 
 
-def wait_ready(url: str, timeout: int = 180) -> None:
+def wait_ready(url: str, timeout: int = 300) -> None:
     deadline = time.time() + timeout
     last = ""
     while time.time() < deadline:
@@ -298,6 +346,10 @@ def collect_prometheus(window: str, backend: str, storage: str) -> list[dict]:
                 "histogram_quantile(0.95, "
                 f'sum by (le) (rate(prism_backend_op_duration_seconds_bucket{{op="range",{match}}}[{window}])))'
             ),
+            "sample_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_backend_op_duration_seconds_bucket{{op="sample",{match}}}[{window}])))'
+            ),
             "storage_write_p95_seconds": first(
                 "histogram_quantile(0.95, "
                 f'sum by (le) (rate(prism_storage_op_duration_seconds_bucket{{op="write",{match}}}[{window}])))'
@@ -310,6 +362,10 @@ def collect_prometheus(window: str, backend: str, storage: str) -> list[dict]:
                 "histogram_quantile(0.95, "
                 f'sum by (le) (rate(prism_storage_op_duration_seconds_bucket{{op="range",{match}}}[{window}])))'
             ),
+            "storage_sample_p95_seconds": first(
+                "histogram_quantile(0.95, "
+                f'sum by (le) (rate(prism_storage_op_duration_seconds_bucket{{op="sample",{match}}}[{window}])))'
+            ),
             "api_p95_seconds": first(
                 "histogram_quantile(0.95, "
                 f'sum by (le) (rate(prism_api_request_duration_seconds_bucket{{{match}}}[{window}])))'
@@ -319,6 +375,9 @@ def collect_prometheus(window: str, backend: str, storage: str) -> list[dict]:
             ),
             "range_error_rate": first(
                 f'sum(rate(prism_backend_ops_total{{op="range",result="error",{match}}}[{window}]))'
+            ),
+            "sample_error_rate": first(
+                f'sum(rate(prism_backend_ops_total{{op="sample",result="error",{match}}}[{window}]))'
             ),
         }
     ]

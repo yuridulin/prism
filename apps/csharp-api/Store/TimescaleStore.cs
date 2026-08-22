@@ -123,6 +123,52 @@ public sealed class TimescaleStore : IStore
         return MergeRange(tagIds, head, tail);
     }
 
+    public async Task<IReadOnlyList<Sample>> SampleAsync(
+        IReadOnlyList<uint> tagIds,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        TimeSpan step,
+        CancellationToken ct = default)
+    {
+        from = from.ToUniversalTime();
+        to = to.ToUniversalTime();
+        await using var conn = await Open(ct);
+        await using var cmd = new NpgsqlCommand(
+            """
+            SELECT g.bucket, t.tag_id, s.ts, s.value, s.quality
+            FROM unnest($1::int4[]) AS t(tag_id)
+            CROSS JOIN generate_series($2::timestamptz, $3::timestamptz, $4::interval) AS g(bucket)
+            CROSS JOIN LATERAL (
+                SELECT ts, value, quality
+                FROM samples
+                WHERE samples.tag_id = t.tag_id AND ts <= g.bucket
+                ORDER BY ts DESC
+                LIMIT 1
+            ) s
+            """, conn);
+        cmd.Parameters.Add(new NpgsqlParameter { Value = StoreUtil.IntTags(tagIds) });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = from.UtcDateTime });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = to.UtcDateTime });
+        cmd.Parameters.Add(new NpgsqlParameter { Value = Resolution.PgInterval(step) });
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var output = new List<Sample>(4096);
+        while (await reader.ReadAsync(ct))
+        {
+            var bucket = ReadTs(reader, 0);
+            var observed = ReadTs(reader, 2);
+            output.Add(new Sample
+            {
+                Ts = bucket,
+                TagId = (uint)reader.GetInt32(1),
+                Value = reader.GetFloat(3),
+                Quality = LocfQuality.Carry((ushort)reader.GetInt16(4), observed, bucket),
+                Carried = observed < bucket
+            });
+        }
+
+        return output;
+    }
+
     private async Task<IReadOnlyList<Sample>> LocfQuery(IReadOnlyList<uint> tagIds, DateTimeOffset at, bool bounded, CancellationToken ct)
     {
         await using var conn = await Open(ct);

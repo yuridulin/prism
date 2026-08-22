@@ -45,8 +45,8 @@ C# на Timescale и VictoriaMetrics. Побеждает выше ingest/s бе�
 
 | Стор | Запись | Чтение |
 |------|--------|--------|
-| Timescale | PostgreSQL **COPY BINARY** (`BeginBinaryImport`) | locf: `unnest` + `LATERAL LIMIT 1`; range: один SQL (head + tail) |
-| VictoriaMetrics | Influx line `POST /write?precision=ns` (`prism_sample{tag_id,quality}`) | locf и range — `/api/v1/export/csv` stream + last/`(from,to]` в адаптере |
+| Timescale | PostgreSQL **COPY BINARY** (`BeginBinaryImport`) | locf: `unnest` + `LATERAL LIMIT 1`; range: head LATERAL + tail `(old, young]`; sample: `generate_series` + LATERAL last |
+| VictoriaMetrics | Influx line `POST /write?precision=ns` (`prism_sample{tag_id,quality}`) | locf: MetricsQL `last_over_time`/`tlast_over_time`; range: locf-seed + export `(old, young]`; sample: `query_range` |
 
 Запрещено: менять OpenAPI, семантику locf/range, envelope, генератор, профили, `apps/go-api` / `apps/rust-api` в этой арене.
 `/readyz` и Observed-метрики должны жить.
@@ -59,7 +59,10 @@ C# на Timescale и VictoriaMetrics. Побеждает выше ingest/s бе�
 
 - Один OpenAPI на все API. Диалекты не плодить.
 - Запись: `ts` UTC, `tag_id` uint32, `value` float, `quality` OPC DA (192 = Good).
-- locf и range — в адаптере хранилища. Stretch и агрегаты в API нет.
+- locf: последняя точка `ts ≤ exact`; в HTTP **сырой ts** (как Sinus ExactLocf), quality через CarryQuality (200 Good_LOCF / 64 LastUsable).
+- range: locf-seed на old (сырой ts) + точки `(old, young]`. VM seed без lookback-дыры.
+- sample: `old`+`young`+`resolution` — сетка в адаптере (Timescale LATERAL, VM query_range). Stretch в API только если стор не умеет.
+- Сравнение чтений — **`storage_*` p95** (данные в памяти). JSON/HTTP — `api_p95`.
 - NATS: `prism.samples`. Новый store оборачивать в `Observed`, чтобы сразу были `storage_*` p95.
 
 ## Git

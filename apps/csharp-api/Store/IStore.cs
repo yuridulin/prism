@@ -9,6 +9,7 @@ public interface IStore : IAsyncDisposable
     Task WriteAsync(IReadOnlyList<Sample> samples, CancellationToken ct = default);
     Task<IReadOnlyList<Sample>> LocfAsync(IReadOnlyList<uint> tagIds, DateTimeOffset at, CancellationToken ct = default);
     Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default);
+    Task<IReadOnlyList<Sample>> SampleAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, TimeSpan step, CancellationToken ct = default);
     Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default);
     Task<IReadOnlyList<Tag>> ListTagsAsync(CancellationToken ct = default);
 }
@@ -39,6 +40,9 @@ internal sealed class FailedStore(string name, string reason) : IStore
         Fail<IReadOnlyList<Sample>>();
 
     public Task<IReadOnlyList<Sample>> RangeAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default) =>
+        Fail<IReadOnlyList<Sample>>();
+
+    public Task<IReadOnlyList<Sample>> SampleAsync(IReadOnlyList<uint> tagIds, DateTimeOffset from, DateTimeOffset to, TimeSpan step, CancellationToken ct = default) =>
         Fail<IReadOnlyList<Sample>>();
 
     public Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default) => Fail();

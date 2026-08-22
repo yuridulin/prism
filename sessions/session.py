@@ -24,12 +24,14 @@ ALL_STORAGES = list(VALID_STORAGES)
 
 VOLUME_SET_BY_PROFILE = {
     "query-mix": "data",
+    "query-sample": "data",
     "write-ceiling": "write",
     "iot-steady": "write",
     "burst": "write",
     "high-cardinality": "write",
     "sinus-like": "mixed",
     "sinus-like-headroom": "mixed",
+    "mixed-year": "mixed",
 }
 STORAGE_VOLUME_SUFFIX = {
     "timescaledb": "timescale",
@@ -403,7 +405,7 @@ def pair_scorecard(slug: str, record: dict) -> dict:
     gen = record.get("generator") or {}
     prom = _prom(record)
     stats = record.get("resources") or {}
-    read_heavy = gen.get("profile") == "query-mix"
+    read_heavy = gen.get("profile") in {"query-mix", "query-sample", "mixed-year"}
     ingest_rate = None if read_heavy else (
         gen.get("ingest_rate") if gen.get("ingest_rate") is not None else prom.get("ingest_rate")
     )
@@ -416,12 +418,14 @@ def pair_scorecard(slug: str, record: dict) -> dict:
         "write_errors": gen.get("write_errors"),
         "query_errors": gen.get("query_errors"),
         "queries": gen.get("queries"),
-        "write_p95_ms": _ms(prom.get("write_p95_seconds")),
-        "locf_p95_ms": _ms(prom.get("locf_p95_seconds")),
-        "range_p95_ms": _ms(prom.get("range_p95_seconds")),
+        "write_p95_ms": _ms(prom.get("storage_write_p95_seconds") or prom.get("write_p95_seconds")),
+        "locf_p95_ms": _ms(prom.get("storage_locf_p95_seconds") or prom.get("locf_p95_seconds")),
+        "range_p95_ms": _ms(prom.get("storage_range_p95_seconds") or prom.get("range_p95_seconds")),
+        "sample_p95_ms": _ms(prom.get("storage_sample_p95_seconds") or prom.get("sample_p95_seconds")),
         "storage_write_p95_ms": _ms(prom.get("storage_write_p95_seconds")),
         "storage_locf_p95_ms": _ms(prom.get("storage_locf_p95_seconds")),
         "storage_range_p95_ms": _ms(prom.get("storage_range_p95_seconds")),
+        "storage_sample_p95_ms": _ms(prom.get("storage_sample_p95_seconds")),
         "api_p95_ms": _ms(prom.get("api_p95_seconds")),
         "cpu_api": (stats.get("api") or {}).get("cpu"),
         "mem_api": (stats.get("api") or {}).get("mem"),
@@ -443,7 +447,7 @@ def build_comparison(session: dict) -> dict:
     profile = (what.get("load") or {}).get("profile")
     pairs = (session.get("results") or {}).get("pairs") or {}
     rows = [pair_scorecard(slug, record) for slug, record in pairs.items()]
-    read_heavy = profile == "query-mix"
+    read_heavy = profile in {"query-mix", "query-sample", "mixed-year"}
     dispatch = what.get("dispatch") or "parallel-by-backend"
     if dispatch == "parallel-by-backend":
         dispatch_note = (
@@ -474,6 +478,7 @@ def build_comparison(session: dict) -> dict:
     ranks = {
         "locf_p95_ms": _rank(rows, "locf_p95_ms", reverse=False),
         "range_p95_ms": _rank(rows, "range_p95_ms", reverse=False),
+        "sample_p95_ms": _rank(rows, "sample_p95_ms", reverse=False),
         "storage_mib": _rank(rows, "storage_mib", reverse=False),
     }
     if not read_heavy:
@@ -499,7 +504,7 @@ def format_comparison(comparison: dict) -> str:
         comparison.get("how", ""),
         "",
         f"{'pair':<24} {'status':<10} {'ingest/s':>10} {'w_err':>6} {'q_err':>6} "
-        f"{'w p95':>8} {'locf':>8} {'range':>8} {'disk':>8} {'cpu api':>8} {'cpu db':>8}",
+        f"{'w p95':>8} {'locf':>8} {'range':>8} {'sample':>8} {'disk':>8} {'cpu api':>8} {'cpu db':>8}",
     ]
     for row in comparison.get("rows") or []:
         lines.append(
@@ -507,7 +512,7 @@ def format_comparison(comparison: dict) -> str:
             f"{_fmt(row.get('ingest_rate'), 10)} {_fmt(row.get('write_errors'), 6)} "
             f"{_fmt(row.get('query_errors'), 6)} {_fmt(row.get('write_p95_ms'), 8)} "
             f"{_fmt(row.get('locf_p95_ms'), 8)} {_fmt(row.get('range_p95_ms'), 8)} "
-            f"{_fmt(row.get('storage_mib'), 8)} "
+            f"{_fmt(row.get('sample_p95_ms'), 8)} {_fmt(row.get('storage_mib'), 8)} "
             f"{_fmt(row.get('cpu_api'), 8)} {_fmt(row.get('cpu_storage'), 8)}"
         )
     ranks = comparison.get("ranks") or {}
@@ -515,9 +520,11 @@ def format_comparison(comparison: dict) -> str:
         lines.append("")
         lines.append("ingest: " + " > ".join(ranks["ingest_rate"]))
     if ranks.get("locf_p95_ms"):
-        lines.append("locf:   " + " > ".join(ranks["locf_p95_ms"]) + "  (меньше p95 лучше)")
+        lines.append("locf:   " + " > ".join(ranks["locf_p95_ms"]) + "  (меньше storage p95 лучше)")
     if ranks.get("range_p95_ms"):
-        lines.append("range:  " + " > ".join(ranks["range_p95_ms"]) + "  (меньше p95 лучше)")
+        lines.append("range:  " + " > ".join(ranks["range_p95_ms"]) + "  (меньше storage p95 лучше)")
+    if ranks.get("sample_p95_ms"):
+        lines.append("sample: " + " > ".join(ranks["sample_p95_ms"]) + "  (меньше storage p95 лучше)")
     if ranks.get("storage_mib"):
         lines.append("disk:   " + " > ".join(ranks["storage_mib"]) + "  (меньше MiB лучше)")
     return "\n".join(lines) + "\n"

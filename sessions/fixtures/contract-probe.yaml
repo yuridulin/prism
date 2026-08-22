@@ -1,8 +1,8 @@
 # Canonical probe for contract parity across backend × storage.
 # Uses high tag ids so query-mix archive (1..80) is not touched.
 # Timestamps must fall inside store retention (400d buckets).
-contract: v1.2
-required_ops: [write, locf, range, tags]
+contract: v1.3
+required_ops: [write, locf, range, sample, tags]
 
 write:
   - { id: 900001, value: 10.5, date: "2026-08-19T12:00:00Z", quality: 192 }
@@ -18,14 +18,21 @@ range:
   old: "2026-08-19T12:00:00Z"
   young: "2026-08-19T12:10:00Z"
 
-# Expected semantics (all backends must match after normalization):
-# locf at 12:07: 900001 -> 11.0 @ 12:05; 900002 has no point <= exact.
+sample:
+  tagsId: [900001]
+  old: "2026-08-19T12:00:00Z"
+  young: "2026-08-19T12:10:00Z"
+  resolution: 5m
+
+# locf: date is the raw observation (Sinus ExactLocf), quality Good_LOCF when lag > 0.
+# range seed keeps raw ts; quality 192 when the point is exactly old.
+# sample grid [old, young] step 5m: 12:00, 12:05, 12:10 (last is locf quality).
 expect:
   locf:
     tags:
       - id: 900001
         values:
-          - { date: "2026-08-19T12:05:00Z", value: 11.0, quality: 192 }
+          - { date: "2026-08-19T12:05:00Z", value: 11.0, quality: 200 }
       - id: 900002
         values: []
   range:
@@ -34,3 +41,10 @@ expect:
         values:
           - { date: "2026-08-19T12:00:00Z", value: 10.5, quality: 192 }
           - { date: "2026-08-19T12:05:00Z", value: 11.0, quality: 192 }
+  sample:
+    tags:
+      - id: 900001
+        values:
+          - { date: "2026-08-19T12:00:00Z", value: 10.5, quality: 192 }
+          - { date: "2026-08-19T12:05:00Z", value: 11.0, quality: 192 }
+          - { date: "2026-08-19T12:10:00Z", value: 11.0, quality: 200 }

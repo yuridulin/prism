@@ -2,19 +2,19 @@ openapi: 3.1.0
 info:
   title: Prism Time-Series API
   version: 1.2.0
-  description: |
-    Контракт стенда, по форме близкий к Datalake `/api/values`:
-      POST — одно чтение (не массив запросов), PUT — пачка точек.
+    description: |
+      Контракт стенда, по форме близкий к Datalake `/api/values`:
+        POST — одно чтение (не массив запросов), PUT — пачка точек.
 
-    Без `Func` / `Resolution` / sample / twavg. Только LOCF и сырой range.
+      Чтение (одно тело, не `ValuesRequest[]`):
+        - `exact` — locf на момент: последняя точка с ts ≤ exact; date = сырой ts наблюдения
+          (как Datalake ExactLocf), quality = CarryQuality (192 / 200 Good_LOCF / 64 LastUsable)
+        - `old` + `young` — locf-seed на old (сырой ts, locf quality) + сырые точки (old, young]
+        - `old` + `young` + `resolution` — сетка [old, young] шагом resolution (date = граница бакета)
+        - ни exact ни old/young — locf на now
 
-    Чтение (одно тело, не `ValuesRequest[]`):
-      - `exact` — locf на момент (как current / ExactLocf)
-      - `old` + `young` — locf на old + точки (old, young]
-      - ни того ни другого — locf на now
-
-    Запись: PUT JSON-массив `{ id, value, date, quality }` (как Datalake PUT).
-    Каталог — `/api/tags`. Ошибки: `{ "error": { "code", "message" } }`.
+      Запись: PUT JSON-массив `{ id, value, date, quality }` (как Datalake PUT).
+      Каталог — `/api/tags`. Ошибки: `{ "error": { "code", "message" } }`.
 servers:
   - url: http://localhost:8081
     description: Go API
@@ -181,7 +181,7 @@ components:
         exact:
           type: string
           format: date-time
-          description: LOCF на этот момент (current / ExactLocf)
+          description: LOCF на этот момент. В ответе date = сырой ts последней точки ≤ exact, quality через CarryQuality.
         old:
           type: string
           format: date-time
@@ -190,6 +190,9 @@ components:
           type: string
           format: date-time
           description: Конец range
+        resolution:
+          type: string
+          description: Шаг сетки sample (1s, 1m, 1h, 1d). Вместе с old/young включает sample, не сырой range.
     ValueRecord:
       type: object
       required: [date, value, quality]
@@ -255,7 +258,7 @@ components:
         contract: { type: string, examples: ["v1.2"] }
         ops:
           type: array
-          items: { type: string, enum: [write, locf, range, tags] }
+          items: { type: string, enum: [write, locf, range, sample, tags] }
     Error:
       type: object
       required: [error]

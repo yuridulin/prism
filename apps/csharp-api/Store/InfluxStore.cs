@@ -75,6 +75,17 @@ public sealed class InfluxStore : IStore
         return seed.Concat(mid).ToList();
     }
 
+    public async Task<IReadOnlyList<Sample>> SampleAsync(
+        IReadOnlyList<uint> tagIds,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        TimeSpan step,
+        CancellationToken ct = default)
+    {
+        var raw = await RangeAsync(tagIds, from, to, ct);
+        return SampleStretch.Fill(tagIds, raw, from, to, step);
+    }
+
     public Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)
     {
         _tags.Upsert(tags);

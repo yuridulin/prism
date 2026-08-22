@@ -4,9 +4,9 @@ namespace Prism.Api.Models;
 
 public static class Contract
 {
-    public const string Version = "v1.2";
+    public const string Version = "v1.3";
     public const ushort QualityGood = 192;
-    public static readonly string[] Ops = ["write", "locf", "range", "tags"];
+    public static readonly string[] Ops = ["write", "locf", "range", "sample", "tags"];
 }
 
 public sealed class Sample
@@ -91,9 +91,19 @@ public sealed class ValuesRequest
     public DateTimeOffset? Exact { get; set; }
     public DateTimeOffset? Old { get; set; }
     public DateTimeOffset? Young { get; set; }
+    public string? Resolution { get; set; }
 
-    public string Mode() =>
-        Old is not null && Old != default && Young is not null && Young != default ? "range" : "locf";
+    public string Mode()
+    {
+        if (Old is not null && Old != default && Young is not null && Young != default)
+        {
+            return Models.Resolution.TryParse(Resolution, out _) ? "sample" : "range";
+        }
+
+        return "locf";
+    }
+
+    public bool TrySampleStep(out TimeSpan step) => Models.Resolution.TryParse(Resolution, out step);
 
     public DateTimeOffset At()
     {

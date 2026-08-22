@@ -1,0 +1,47 @@
+name: query-sample
+description: >-
+  Same year archive as query-mix, then sampled range on a resolution grid.
+  1s only on short windows; 1m/1h/1d on longer ones. Native store sample,
+  not in-API stretch of a raw 345k dump.
+
+transport: http
+duration: 0
+
+archive:
+  enabled: true
+  span: 365d
+  batch: 2000
+  workers: 4
+  tags:
+    - { class: frequent, start: 1, count: 8, period: 1m }
+    - { class: rare, start: 9, count: 72, period: 1h }
+
+ingest:
+  enabled: false
+  rate: 0
+  batch: 100
+  workers: 1
+  tag_start: 1
+  tag_count: 80
+  good_ratio: 0.98
+  out_of_order: 0.0
+  late_ms: 0
+
+query:
+  enabled: true
+  rate: 16
+  workers: 8
+  rng_seed: 42
+  tag_sets:
+    - { class: frequent, size: 1 }
+    - { class: rare, size: 1 }
+    - { class: frequent, size: 8 }
+    - { class: mixed, size: 8 }
+  at_offsets: [0s]
+  end_offsets: [0s, 7d, 30d]
+  mix:
+    - { op: sample, weight: 1, window: 1h, step: 1s }
+    - { op: sample, weight: 2, window: 1d, step: 1m }
+    - { op: sample, weight: 2, window: 7d, step: 1h }
+    - { op: sample, weight: 2, window: 30d, step: 1h }
+    - { op: sample, weight: 2, window: 30d, step: 1d }

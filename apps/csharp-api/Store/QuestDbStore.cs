@@ -81,6 +81,17 @@ public sealed class QuestDbStore : IStore
         return await ExpSamples(ct, q);
     }
 
+    public async Task<IReadOnlyList<Sample>> SampleAsync(
+        IReadOnlyList<uint> tagIds,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        TimeSpan step,
+        CancellationToken ct = default)
+    {
+        var raw = await RangeAsync(tagIds, from, to, ct);
+        return SampleStretch.Fill(tagIds, raw, from, to, step);
+    }
+
     public async Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)
     {
         foreach (var tag in tags)

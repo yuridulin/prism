@@ -1,0 +1,83 @@
+profile: write-ceiling
+duration: 3m
+envelope:
+  api:
+    cpus: '1.0'
+    memory: 512M
+  storage:
+    cpus: '1.0'
+    memory: 1G
+  bus:
+    cpus: '0.50'
+    memory: 256M
+  observe:
+    cpus: '0.50'
+    memory: 512M
+  generator:
+    cpus: '1.0'
+    memory: 512M
+how: Одинаковый resource envelope. На каждый backend — параллельно N копий API (по
+  одной на storage), общие БД, один 5m query. Эффективнее та, что держит предложенный
+  ingest без ошибок и отвечает быстрее на locf/range. storage_*_p95 показывает, где
+  сидит задержка — в БД или в API.
+primary: write
+rows:
+- pair: csharp-timescaledb
+  status: completed
+  ingest_rate: 92171.6
+  seed_written: null
+  seed_elapsed_seconds: null
+  write_errors: 0
+  query_errors: 0
+  queries: 0
+  write_p95_ms: 4.944
+  locf_p95_ms: null
+  range_p95_ms: null
+  sample_p95_ms: null
+  storage_write_p95_ms: 4.944
+  storage_locf_p95_ms: null
+  storage_range_p95_ms: null
+  storage_sample_p95_ms: null
+  api_p95_ms: 15.885
+  cpu_api: 2.42%
+  mem_api: 66.43MiB
+  cpu_storage: 2.78%
+  mem_storage: 614.9MiB
+  storage_bytes: 1862266864
+  storage_mib: 1776.0
+- pair: csharp-victoriametrics
+  status: completed
+  ingest_rate: 94187.8
+  seed_written: null
+  seed_elapsed_seconds: null
+  write_errors: 0
+  query_errors: 0
+  queries: 0
+  write_p95_ms: 4.89
+  locf_p95_ms: null
+  range_p95_ms: null
+  sample_p95_ms: null
+  storage_write_p95_ms: 4.89
+  storage_locf_p95_ms: null
+  storage_range_p95_ms: null
+  storage_sample_p95_ms: null
+  api_p95_ms: 9.7
+  cpu_api: 2.63%
+  mem_api: 76.48MiB
+  cpu_storage: 22.02%
+  mem_storage: 35.28MiB
+  storage_bytes: 51051649
+  storage_mib: 48.7
+ranks:
+  ingest_rate:
+  - csharp-victoriametrics
+  - csharp-timescaledb
+  write_p95_ms:
+  - csharp-victoriametrics
+  - csharp-timescaledb
+  locf_p95_ms: []
+  range_p95_ms: []
+  sample_p95_ms: []
+  storage_mib:
+  - csharp-victoriametrics
+  - csharp-timescaledb

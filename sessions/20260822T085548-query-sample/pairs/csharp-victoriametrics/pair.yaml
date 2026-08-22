@@ -1,0 +1,108 @@
+backend: csharp
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-22T09:00:58Z'
+  finished_at: '2026-08-22T09:01:01Z'
+services:
+- nats
+- prometheus
+- victoriametrics
+- csharp-api
+reuse_volumes: false
+volume_set: data
+skip_seed: true
+dispatch: parallel-by-backend
+api_container: prism-p085548-csharp-vm
+generator:
+  profile: query-sample
+  written: 4835600
+  queries: 2712
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 216.9
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 36.9
+  query_elapsed_seconds: 180.0
+meta:
+  backend: csharp
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.3
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - tags
+prometheus:
+- backend: csharp
+  storage: victoriametrics
+  ingest_rate: 0.0
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  sample_p95_seconds: 0.08940809968847349
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  storage_sample_p95_seconds: 0.08940809968847349
+  api_p95_seconds: 0.09070121951219508
+  locf_error_rate: null
+  range_error_rate: null
+  sample_error_rate: null
+resources:
+  raw:
+  - name: prism-prometheus-1
+    cpu: 0.18%
+    mem: 44.3MiB
+  - name: prism-p085548-csharp-vm
+    cpu: 3.66%
+    mem: 170.6MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 9.324MiB
+  - name: prism-nats-1
+    cpu: 0.04%
+    mem: 4.09MiB
+  - name: prism-timescaledb-1
+    cpu: 0.06%
+    mem: 323MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.66%
+    mem: 225MiB
+  - name: sinus-infra-keycloak
+    cpu: 0.09%
+    mem: 458.6MiB
+  - name: sinus-infra-mongo-express
+    cpu: 0.00%
+    mem: 31.6MiB
+  - name: sinus-infra-timescale
+    cpu: 76.49%
+    mem: 2.582GiB
+  - name: sinus-infra-postgres
+    cpu: 0.18%
+    mem: 172.4MiB
+  - name: sinus-infra-redis
+    cpu: 0.39%
+    mem: 6.609MiB
+  - name: sinus-infra-mongodb
+    cpu: 0.44%
+    mem: 76.82MiB
+  api:
+    cpu: 3.66%
+    mem: 170.6MiB
+  storage:
+    cpu: 0.66%
+    mem: 225MiB
+storage_size:
+  bytes: 15653160
+  mib: 14.9
+  volume: prism_vm_data
+  path: /victoria-metrics-data

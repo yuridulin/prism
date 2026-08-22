@@ -204,13 +204,29 @@ static async Task<IResult> ServeRead(IStore store, ValuesRequest? req, Cancellat
     var start = Stopwatch.StartNew();
     try
     {
-        if (mode == "range")
+        if (mode == "sample")
         {
-            raw = await store.RangeAsync(req.TagsId, req.Old!.Value.ToUniversalTime(), req.Young!.Value.ToUniversalTime(), ct);
+            if (!req.TrySampleStep(out var step))
+            {
+                return ApiErrors.Invalid("resolution is required for sample");
+            }
+
+            raw = await store.SampleAsync(
+                req.TagsId,
+                req.Old!.Value.ToUniversalTime(),
+                req.Young!.Value.ToUniversalTime(),
+                step,
+                ct);
+        }
+        else if (mode == "range")
+        {
+            raw = LocfQuality.StampRangeCarried(
+                await store.RangeAsync(req.TagsId, req.Old!.Value.ToUniversalTime(), req.Young!.Value.ToUniversalTime(), ct),
+                req.Old!.Value.ToUniversalTime());
         }
         else
         {
-            raw = await store.LocfAsync(req.TagsId, req.At(), ct);
+            raw = LocfQuality.StampLocf(await store.LocfAsync(req.TagsId, req.At(), ct), req.At());
         }
     }
     catch (Exception ex)

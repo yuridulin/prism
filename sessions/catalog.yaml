@@ -278,3 +278,43 @@ sessions:
   - csharp-timescaledb
   - csharp-victoriametrics
   path: sessions/20260822T071023-query-mix/session.yaml
+- id: 20260822T084618-write-ceiling
+  status: completed
+  created_at: '2026-08-22T08:46:18Z'
+  why: 'WSL rematch after locf raw-date, VM last, sample: write-ceiling'
+  profile: write-ceiling
+  duration: 3m
+  pairs:
+  - csharp-timescaledb
+  - csharp-victoriametrics
+  path: sessions/20260822T084618-write-ceiling/session.yaml
+- id: 20260822T085043-query-mix
+  status: completed
+  created_at: '2026-08-22T08:50:43Z'
+  why: 'WSL rematch: query-mix on fresh data volumes after locf/sample contract'
+  profile: query-mix
+  duration: 3m
+  pairs:
+  - csharp-timescaledb
+  - csharp-victoriametrics
+  path: sessions/20260822T085043-query-mix/session.yaml
+- id: 20260822T085548-query-sample
+  status: completed
+  created_at: '2026-08-22T08:55:48Z'
+  why: 'WSL rematch: query-sample native resolution on fresh year archive'
+  profile: query-sample
+  duration: 3m
+  pairs:
+  - csharp-timescaledb
+  - csharp-victoriametrics
+  path: sessions/20260822T085548-query-sample/session.yaml
+- id: 20260822T090142-mixed-year
+  status: completed
+  created_at: '2026-08-22T09:01:42Z'
+  why: 'WSL rematch last: mixed-year locf+range+sample with live ingest'
+  profile: mixed-year
+  duration: 3m
+  pairs:
+  - csharp-timescaledb
+  - csharp-victoriametrics
+  path: sessions/20260822T090142-mixed-year/session.yaml

@@ -1,0 +1,111 @@
+backend: csharp
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-22T08:50:17Z'
+  finished_at: '2026-08-22T08:50:21Z'
+services:
+- nats
+- prometheus
+- victoriametrics
+- csharp-api
+reuse_volumes: false
+volume_set: write
+skip_seed: false
+dispatch: parallel-by-backend
+api_container: prism-p084618-csharp-vm
+generator:
+  profile: write-ceiling
+  written: 16954500
+  queries: 0
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 94187.8
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: csharp
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.3
+  ops:
+  - write
+  - locf
+  - range
+  - sample
+  - tags
+prometheus:
+- backend: csharp
+  storage: victoriametrics
+  ingest_rate: 94013.4064037579
+  write_error_rate: null
+  write_p95_seconds: 0.004889769260852562
+  locf_p95_seconds: null
+  range_p95_seconds: null
+  sample_p95_seconds: null
+  storage_write_p95_seconds: 0.004889769260852561
+  storage_locf_p95_seconds: null
+  storage_range_p95_seconds: null
+  storage_sample_p95_seconds: null
+  api_p95_seconds: 0.009700209166969807
+  locf_error_rate: null
+  range_error_rate: null
+  sample_error_rate: null
+resources:
+  raw:
+  - name: sinus-infra-mongo-express
+    cpu: 0.00%
+    mem: 32.33MiB
+  - name: sinus-infra-timescale
+    cpu: 3.36%
+    mem: 135MiB
+  - name: sinus-infra-postgres
+    cpu: 0.02%
+    mem: 34.45MiB
+  - name: sinus-infra-redis
+    cpu: 2.56%
+    mem: 6.367MiB
+  - name: sinus-infra-mongodb
+    cpu: 0.34%
+    mem: 75.74MiB
+  - name: prism-prometheus-1
+    cpu: 0.39%
+    mem: 32.19MiB
+  - name: prism-p084618-csharp-vm
+    cpu: 2.63%
+    mem: 76.48MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 7.656MiB
+  - name: prism-timescaledb-1
+    cpu: 4.37%
+    mem: 592.8MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 3.922MiB
+  - name: prism-victoriametrics-1
+    cpu: 22.02%
+    mem: 35.28MiB
+  - name: sinus-infra-keycloak
+    cpu: 175.89%
+    mem: 132.5MiB
+  - name: sinus-server-pulsar-svc
+    cpu: 0.16%
+    mem: 4.867MiB
+  api:
+    cpu: 2.63%
+    mem: 76.48MiB
+  storage:
+    cpu: 22.02%
+    mem: 35.28MiB
+storage_size:
+  bytes: 51051649
+  mib: 48.7
+  volume: prism_vm_write
+  path: /victoria-metrics-data

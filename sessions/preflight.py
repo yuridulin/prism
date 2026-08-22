@@ -244,16 +244,26 @@ def probe_pair(
     if status != 200:
         return None, [f"{slug}: range HTTP {status} {range_body}"]
 
+    sample_payload = dict(fixture.get("sample") or {})
+    sample_body = None
+    if sample_payload:
+        status, sample_body = http_json("POST", f"{base}/api/values", sample_payload)
+        if status != 200:
+            return None, [f"{slug}: sample HTTP {status} {sample_body}"]
+
     answers = {
         "locf": normalize_values(locf_body),
         "range": normalize_values(range_body),
     }
+    if sample_body is not None:
+        answers["sample"] = normalize_values(sample_body)
     expect = fixture.get("expect") or {}
-    for op in ("locf", "range"):
+    for op in ("locf", "range", "sample"):
         golden = expect.get(op)
         if not golden:
             continue
-        if answers[op] != normalize_values(golden):
+        got = answers.get(op)
+        if got is None or got != normalize_values(golden):
             issues.append(f"{slug}: {op} differs from fixture expect")
     return answers, issues
 
