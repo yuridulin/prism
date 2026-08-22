@@ -1,0 +1,77 @@
+profile: query-mix
+duration: 3m
+envelope:
+  api:
+    cpus: '1.0'
+    memory: 512M
+  storage:
+    cpus: '1.0'
+    memory: 1G
+  bus:
+    cpus: '0.50'
+    memory: 256M
+  observe:
+    cpus: '0.50'
+    memory: 512M
+  generator:
+    cpus: '1.0'
+    memory: 512M
+how: Одинаковый resource envelope. Каждая пара — отдельный чистый старт. Сначала тот
+  же архив (год, частые и редкие теги), затем только locf/range. Эффективнее та, что
+  отвечает быстрее на locf и range без ошибок и занимает меньше места тем же архивом.
+  storage_*_p95 показывает, где сидит задержка — в БД или в API. Seed в scorecard
+  не входит.
+primary: read
+rows:
+- pair: csharp-timescaledb
+  status: completed
+  ingest_rate: null
+  seed_written: 0
+  seed_elapsed_seconds: 0.0
+  write_errors: 0
+  query_errors: 0
+  queries: 436
+  write_p95_ms: null
+  locf_p95_ms: 6750.0
+  range_p95_ms: 10000.0
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 6750.0
+  storage_range_p95_ms: 10000.0
+  api_p95_ms: 10000.0
+  cpu_api: 0.66%
+  mem_api: 190MiB
+  cpu_storage: 0.05%
+  mem_storage: 80.7MiB
+  storage_bytes: 381038620
+  storage_mib: 363.4
+- pair: csharp-victoriametrics
+  status: completed
+  ingest_rate: null
+  seed_written: 0
+  seed_elapsed_seconds: 0.0
+  write_errors: 0
+  query_errors: 0
+  queries: 2669
+  write_p95_ms: null
+  locf_p95_ms: 19.23
+  range_p95_ms: 98.594
+  storage_write_p95_ms: null
+  storage_locf_p95_ms: 19.23
+  storage_range_p95_ms: 98.594
+  api_p95_ms: 132.699
+  cpu_api: 0.92%
+  mem_api: 170.8MiB
+  cpu_storage: 0.45%
+  mem_storage: 23.27MiB
+  storage_bytes: 15474724
+  storage_mib: 14.8
+ranks:
+  locf_p95_ms:
+  - csharp-victoriametrics
+  - csharp-timescaledb
+  range_p95_ms:
+  - csharp-victoriametrics
+  - csharp-timescaledb
+  storage_mib:
+  - csharp-victoriametrics
+  - csharp-timescaledb

@@ -9,6 +9,8 @@ using Prism.Api.Models;
 using Prism.Api.Store;
 using Prometheus;
 
+ThreadPool.SetMinThreads(16, 16);
+
 var cfg = AppConfig.Load();
 IStore store;
 try
@@ -23,12 +25,19 @@ catch (Exception ex)
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(AppConfig.ToListenUrl(cfg.HttpAddr));
+builder.WebHost.ConfigureKestrel(o =>
+{
+    o.AddServerHeader = false;
+    o.Limits.MaxRequestBodySize = 32 * 1024 * 1024;
+});
 builder.Services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
 builder.Services.ConfigureHttpJsonOptions(o => ConfigureJson(o.SerializerOptions));
 builder.Logging.ClearProviders();
+builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddConsole();
 
 var app = builder.Build();
+ThreadPool.SetMinThreads(16, 16);
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 ConfigureJson(json);
 
@@ -152,7 +161,7 @@ app.MapPut("/api/values", async (List<WriteSample>? items, CancellationToken ct)
     {
         await store.WriteAsync(samples, ct);
         PrismMetrics.ObserveBackend(store.Name, "write", "http", samples.Count, start.Elapsed, null);
-        return Results.Json(new WriteResponse { Written = samples.Count });
+        return Results.Json(new WriteResponse { Written = samples.Count }, PrismJsonContext.Default.WriteResponse);
     }
     catch (Exception ex)
     {
@@ -211,5 +220,5 @@ static async Task<IResult> ServeRead(IStore store, ValuesRequest? req, Cancellat
     }
 
     PrismMetrics.ObserveBackend(store.Name, mode, "http", raw.Count, start.Elapsed, null);
-    return Results.Json(ReadLogic.Assemble(req, raw));
+    return new ReadLogic.ValuesJsonResult(req, raw);
 }

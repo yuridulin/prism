@@ -19,10 +19,10 @@ from session import (
     API_HOST,
     API_META,
     API_READY,
+    DEFAULT_BACKENDS,
+    DEFAULT_STORAGES,
     ROOT,
     SessionError,
-    VALID_BACKENDS,
-    VALID_STORAGES,
     pair_slug,
     volume_set_for_profile,
 )
@@ -244,10 +244,18 @@ def probe_pair(
     if status != 200:
         return None, [f"{slug}: range HTTP {status} {range_body}"]
 
-    return {
+    answers = {
         "locf": normalize_values(locf_body),
         "range": normalize_values(range_body),
-    }, []
+    }
+    expect = fixture.get("expect") or {}
+    for op in ("locf", "range"):
+        golden = expect.get(op)
+        if not golden:
+            continue
+        if answers[op] != normalize_values(golden):
+            issues.append(f"{slug}: {op} differs from fixture expect")
+    return answers, issues
 
 
 def run_preflight(
@@ -262,8 +270,11 @@ def run_preflight(
     fixture = load_fixture()
     profile = (session.get("what") or {}).get("load") or {}
     volume_set = volume_set_for_profile(profile.get("profile", ""))
-    backends = list(backends or VALID_BACKENDS)
-    storages = list(storages or VALID_STORAGES)
+    pairs = (session.get("what") or {}).get("pairs") or []
+    if backends is None:
+        backends = list(dict.fromkeys(p["backend"] for p in pairs)) or list(DEFAULT_BACKENDS)
+    if storages is None:
+        storages = list(dict.fromkeys(p["storage"] for p in pairs)) or list(DEFAULT_STORAGES)
 
     print(
         f"preflight: volume_set={volume_set} storages={','.join(storages)} "

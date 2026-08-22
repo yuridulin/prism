@@ -17,6 +17,9 @@ CATALOG_PATH = SESSIONS_DIR / "catalog.yaml"
 RESOURCE_GROUPS = ("api", "storage", "bus", "observe", "generator")
 VALID_BACKENDS = ("go", "csharp", "rust")
 VALID_STORAGES = ("timescaledb", "questdb", "victoriametrics")
+# Default arena (defaults.yaml): preferred C# stack, Timescale vs VM.
+DEFAULT_BACKENDS = ("csharp",)
+DEFAULT_STORAGES = ("timescaledb", "victoriametrics")
 ALL_STORAGES = list(VALID_STORAGES)
 
 VOLUME_SET_BY_PROFILE = {
@@ -160,15 +163,19 @@ def volume_set_for(session: dict) -> str:
 
 
 def pair_services(pair: dict) -> list[str]:
-    return backend_stack_services(pair["backend"])
+    return backend_stack_services(pair["backend"], [pair["storage"]])
 
 
-def backend_stack_services(backend: str) -> list[str]:
-    return storage_stack_services() + [API_SERVICE[backend]]
+def backend_stack_services(backend: str, storages: list[str] | None = None) -> list[str]:
+    return storage_stack_services(storages) + [API_SERVICE[backend]]
 
 
-def storage_stack_services() -> list[str]:
-    return ["nats", "prometheus", *ALL_STORAGES, "postgres-exporter"]
+def storage_stack_services(storages: list[str] | None = None) -> list[str]:
+    dbs = list(storages if storages is not None else ALL_STORAGES)
+    services = ["nats", "prometheus", *dbs]
+    if "timescaledb" in dbs:
+        services.append("postgres-exporter")
+    return services
 
 
 def parallel_host_port(backend: str, storage: str) -> int:

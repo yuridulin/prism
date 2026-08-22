@@ -1,0 +1,211 @@
+id: 20260822T060501-query-mix
+status: completed
+when:
+  created_at: '2026-08-22T06:05:01Z'
+  started_at: '2026-08-22T06:05:02Z'
+  finished_at: '2026-08-22T06:13:16Z'
+why: Timescale known-good store rematch
+what:
+  duration: 3m
+  duration_seconds: 180
+  load:
+    profile: query-mix
+    transport: ''
+  pairs:
+  - backend: csharp
+    storage: timescaledb
+  resources: &id001
+    api:
+      cpus: '1.0'
+      memory: 512M
+    storage:
+      cpus: '1.0'
+      memory: 1G
+    bus:
+      cpus: '0.50'
+      memory: 256M
+    observe:
+      cpus: '0.50'
+      memory: 512M
+    generator:
+      cpus: '1.0'
+      memory: 512M
+  reuse_volumes: true
+  skip_seed: true
+  archive_end: '2026-08-20T16:49:20Z'
+  dispatch: by-pair
+  volume_set: data
+  skip_preflight: true
+results:
+  pairs:
+    csharp-timescaledb:
+      backend: csharp
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-22T06:05:03Z'
+        finished_at: '2026-08-22T06:13:14Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - postgres-exporter
+      - csharp-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 353
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.4
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.4
+      meta:
+        backend: csharp
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus_error: 'request failed http://127.0.0.1:9090/api/v1/query?query=sum%28rate%28prism_backend_items_total%7Bop%3D%22write%22%2Cbackend%3D%22csharp%22%2Cstorage%3D%22timescaledb%22%7D%5B3m%5D%29%29:
+        timed out'
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 15.59%
+          mem: 246.7MiB
+        - name: sinus-server-gateway-svc
+          cpu: 7.79%
+          mem: 205.1MiB
+        - name: sinus-server-pulsar-svc
+          cpu: 7.70%
+          mem: 383.3MiB
+        - name: sinus-server-dashboards-svc
+          cpu: 11.73%
+          mem: 383.6MiB
+        - name: sinus-server-datalake-svc
+          cpu: 49.87%
+          mem: 425.9MiB
+        - name: sinus-infra-mongo-express
+          cpu: 1.08%
+          mem: 11.17MiB
+        - name: sinus-infra-keycloak
+          cpu: 0.25%
+          mem: 269.7MiB
+        - name: sinus-infra-postgres
+          cpu: 0.00%
+          mem: 15.44MiB
+        - name: sinus-infra-timescale
+          cpu: 2.32%
+          mem: 752.1MiB
+        - name: sinus-infra-redis
+          cpu: 5.48%
+          mem: 2.203MiB
+        - name: sinus-infra-mongodb
+          cpu: 61.87%
+          mem: 15.59MiB
+        - name: prism-rust-api-1
+          cpu: 0.66%
+          mem: 1.488MiB
+        - name: prism-go-api-1
+          cpu: 1.28%
+          mem: 17.06MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 9.398MiB
+        - name: prism-timescaledb-1
+          cpu: 12.23%
+          mem: 62.34MiB
+        - name: prism-victoriametrics-1
+          cpu: 1.16%
+          mem: 13.23MiB
+        - name: prism-prometheus-1
+          cpu: 52.18%
+          mem: 49.26MiB
+        - name: prism-nats-1
+          cpu: 0.59%
+          mem: 17.98MiB
+        - name: prism-questdb-1
+          cpu: 2.69%
+          mem: 141.5MiB
+        api:
+          cpu: 15.59%
+          mem: 246.7MiB
+        storage:
+          cpu: 12.23%
+          mem: 62.34MiB
+      storage_size:
+        bytes: 381038620
+        mib: 363.4
+        volume: prism_timescale_data
+        path: /var/lib/postgresql/data
+  comparison:
+    profile: query-mix
+    duration: 3m
+    envelope: *id001
+    how: Одинаковый resource envelope. Каждая пара — отдельный чистый старт. Сначала
+      тот же архив (год, частые и редкие теги), затем только locf/range. Эффективнее
+      та, что отвечает быстрее на locf и range без ошибок и занимает меньше места
+      тем же архивом. storage_*_p95 показывает, где сидит задержка — в БД или в API.
+      Seed в scorecard не входит.
+    primary: read
+    rows:
+    - pair: csharp-timescaledb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 353
+      write_p95_ms: null
+      locf_p95_ms: null
+      range_p95_ms: null
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: null
+      storage_range_p95_ms: null
+      api_p95_ms: null
+      cpu_api: 15.59%
+      mem_api: 246.7MiB
+      cpu_storage: 12.23%
+      mem_storage: 62.34MiB
+      storage_bytes: 381038620
+      storage_mib: 363.4
+    ranks:
+      locf_p95_ms: []
+      range_p95_ms: []
+      storage_mib:
+      - csharp-timescaledb
+conclusions: 'Черновик по цифрам. Заменить человеческим выводом.
+
+
+  Сравнение пар: профиль query-mix за 3m.
+
+  Одинаковый resource envelope. Каждая пара — отдельный чистый старт. Сначала тот
+  же архив (год, частые и редкие теги), затем только locf/range. Эффективнее та, что
+  отвечает быстрее на locf и range без ошибок и занимает меньше места тем же архивом.
+  storage_*_p95 показывает, где сидит задержка — в БД или в API. Seed в scorecard
+  не входит.
+
+
+  pair                     status       ingest/s  w_err  q_err    w p95     locf    range     disk  cpu
+  api   cpu db
+
+  csharp-timescaledb       completed         n/a      0      0      n/a      n/a      n/a    363.4   15.59%   12.23%
+
+  disk:   csharp-timescaledb  (меньше MiB лучше)
+
+  '

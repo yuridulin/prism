@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Buffers.Text;
 using System.Globalization;
 using System.Net.Http.Headers;
 using Prism.Api.Models;
@@ -15,7 +17,8 @@ public sealed class VictoriaMetricsStore : IStore
     public VictoriaMetricsStore(string url)
     {
         _base = url.TrimEnd('/');
-        _http = StoreUtil.CreatePooledHttp(TimeSpan.FromSeconds(15), _base + "/");
+        _http = StoreUtil.CreatePooledHttp(TimeSpan.FromSeconds(30), _base + "/");
+        _http.DefaultRequestHeaders.ExpectContinue = false;
     }
 
     public string Name => "victoriametrics";
@@ -36,10 +39,9 @@ public sealed class VictoriaMetricsStore : IStore
             return;
         }
 
-        using var buf = new ByteWriter(80 * samples.Count);
+        using var buf = new ByteWriter(64 * samples.Count);
         foreach (var sample in samples)
         {
-            // Same ILP as Go: empty measurement, quality label, field prism_sample.
             buf.AppendAscii(",tag_id=");
             buf.AppendUInt(sample.TagId);
             buf.AppendAscii(",quality=");
@@ -51,7 +53,7 @@ public sealed class VictoriaMetricsStore : IStore
             buf.AppendByte((byte)'\n');
         }
 
-        using var content = new ByteArrayContent(buf.Buffer, 0, buf.Length);
+        using var content = new ReadOnlyMemoryContent(buf.Written);
         content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         using var resp = await _http.PostAsync("write?precision=ns", content, ct);
         await StoreUtil.EnsureSuccess(resp, "vm write", ct);
@@ -85,58 +87,61 @@ public sealed class VictoriaMetricsStore : IStore
         }
 
         var qs =
-            $"match[]={Uri.EscapeDataString($"prism_sample{{tag_id=~\"{string.Join('|', tagIds)}\"}}")}" +
+            $"match[]={Uri.EscapeDataString($"prism_sample{{tag_id=~\"{JoinPipe(tagIds)}\"}}")}" +
             $"&start={exportStart.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}" +
             $"&end={exportEnd.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)}" +
             "&format=" + Uri.EscapeDataString("tag_id,quality,__value__,__timestamp__:unix_ms");
         using var resp = await _http.GetAsync(_base + "/api/v1/export/csv?" + qs, HttpCompletionOption.ResponseHeadersRead, ct);
         await StoreUtil.EnsureSuccess(resp, "vm export", ct);
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-        using var doc = new StreamReader(stream);
 
         var best = new Dictionary<uint, Sample>(tagIds.Count);
-        var mid = new List<Sample>(4096);
-        while (await doc.ReadLineAsync(ct) is { } line)
+        var mid = withMid ? new List<Sample>(65536) : null;
+        var fromMs = from.ToUnixTimeMilliseconds();
+        var toMs = to.ToUnixTimeMilliseconds();
+
+        var rented = ArrayPool<byte>.Shared.Rent(64 << 10);
+        var filled = 0;
+        try
         {
-            if (line.Length == 0 || line.StartsWith("tag_id", StringComparison.Ordinal))
+            while (true)
             {
-                continue;
-            }
-
-            if (!TryParseExportLine(line, out var id, out var quality, out var val, out var t))
-            {
-                continue;
-            }
-
-            if (t <= from)
-            {
-                if (!best.TryGetValue(id, out var prev) || t > prev.Ts)
+                var n = await stream.ReadAsync(rented.AsMemory(filled), ct);
+                if (n == 0)
                 {
-                    best[id] = new Sample
-                    {
-                        Ts = t,
-                        TagId = id,
-                        Value = val,
-                        Quality = quality,
-                        Carried = withMid
-                    };
+                    break;
                 }
-                continue;
+
+                filled += n;
+                var consumed = Consume(rented.AsSpan(0, filled), best, mid, fromMs, toMs, withMid);
+                if (consumed > 0)
+                {
+                    filled -= consumed;
+                    if (filled > 0)
+                    {
+                        Buffer.BlockCopy(rented, consumed, rented, 0, filled);
+                    }
+                }
+                else if (filled == rented.Length)
+                {
+                    var bigger = ArrayPool<byte>.Shared.Rent(rented.Length * 2);
+                    Buffer.BlockCopy(rented, 0, bigger, 0, filled);
+                    ArrayPool<byte>.Shared.Return(rented);
+                    rented = bigger;
+                }
             }
 
-            if (withMid && t <= to)
+            if (filled > 0)
             {
-                mid.Add(new Sample
-                {
-                    Ts = t,
-                    TagId = id,
-                    Value = val,
-                    Quality = quality
-                });
+                ParseLine(rented.AsSpan(0, filled), best, mid, fromMs, toMs, withMid);
             }
         }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
 
-        var seed = new List<Sample>(tagIds.Count);
+        var seed = new List<Sample>(tagIds.Count + (mid?.Count ?? 0));
         foreach (var id in tagIds)
         {
             if (best.TryGetValue(id, out var sample))
@@ -145,60 +150,151 @@ public sealed class VictoriaMetricsStore : IStore
             }
         }
 
-        if (!withMid)
+        if (mid is { Count: > 0 })
         {
-            return seed;
+            seed.AddRange(mid);
         }
 
-        seed.AddRange(mid);
         return seed;
     }
 
-    private static bool TryParseExportLine(string line, out uint id, out ushort quality, out double val, out DateTimeOffset t)
+    private static string JoinPipe(IReadOnlyList<uint> ids)
+    {
+        var sb = new System.Text.StringBuilder(ids.Count * 6);
+        for (var i = 0; i < ids.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append('|');
+            }
+
+            sb.Append(ids[i].ToString(CultureInfo.InvariantCulture));
+        }
+
+        return sb.ToString();
+    }
+
+    private static int Consume(
+        ReadOnlySpan<byte> buf,
+        Dictionary<uint, Sample> best,
+        List<Sample>? mid,
+        long fromMs,
+        long toMs,
+        bool withMid)
+    {
+        var start = 0;
+        while (true)
+        {
+            var slice = buf[start..];
+            var nl = slice.IndexOf((byte)'\n');
+            if (nl < 0)
+            {
+                break;
+            }
+
+            ParseLine(slice[..nl], best, mid, fromMs, toMs, withMid);
+            start += nl + 1;
+        }
+
+        return start;
+    }
+
+    private static void ParseLine(
+        ReadOnlySpan<byte> line,
+        Dictionary<uint, Sample> best,
+        List<Sample>? mid,
+        long fromMs,
+        long toMs,
+        bool withMid)
+    {
+        if (line.Length > 0 && line[^1] == (byte)'\r')
+        {
+            line = line[..^1];
+        }
+
+        if (line.Length == 0 || line[0] == (byte)'t')
+        {
+            return;
+        }
+
+        if (!TryParseExportLine(line, out var id, out var quality, out var val, out var ms))
+        {
+            return;
+        }
+
+        if (ms <= fromMs)
+        {
+            var t = DateTimeOffset.FromUnixTimeMilliseconds(ms);
+            if (!best.TryGetValue(id, out var prev) || t > prev.Ts)
+            {
+                best[id] = new Sample
+                {
+                    Ts = t,
+                    TagId = id,
+                    Value = val,
+                    Quality = quality,
+                    Carried = withMid
+                };
+            }
+
+            return;
+        }
+
+        if (withMid && ms <= toMs)
+        {
+            mid!.Add(new Sample
+            {
+                Ts = DateTimeOffset.FromUnixTimeMilliseconds(ms),
+                TagId = id,
+                Value = val,
+                Quality = quality
+            });
+        }
+    }
+
+    private static bool TryParseExportLine(
+        ReadOnlySpan<byte> line,
+        out uint id,
+        out ushort quality,
+        out double val,
+        out long ms)
     {
         id = 0;
         quality = 0;
         val = 0;
-        t = default;
-        var span = line.AsSpan();
-        var c1 = span.IndexOf(',');
+        ms = 0;
+        var c1 = line.IndexOf((byte)',');
         if (c1 <= 0)
         {
             return false;
         }
 
-        var rest = span[(c1 + 1)..];
-        var c2 = rest.IndexOf(',');
+        var rest = line[(c1 + 1)..];
+        var c2 = rest.IndexOf((byte)',');
         if (c2 <= 0)
         {
             return false;
         }
 
         var rest2 = rest[(c2 + 1)..];
-        var c3 = rest2.IndexOf(',');
+        var c3 = rest2.IndexOf((byte)',');
         if (c3 <= 0)
         {
             return false;
         }
 
-        if (!uint.TryParse(span[..c1], NumberStyles.Integer, CultureInfo.InvariantCulture, out id))
+        if (!Utf8Parser.TryParse(line[..c1], out id, out _))
         {
             return false;
         }
 
-        if (int.TryParse(rest[..c2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var q))
+        if (Utf8Parser.TryParse(rest[..c2], out int q, out _))
         {
             quality = (ushort)q;
         }
 
-        double.TryParse(rest2[..c3], NumberStyles.Float, CultureInfo.InvariantCulture, out val);
-        if (!long.TryParse(rest2[(c3 + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms))
-        {
-            return false;
-        }
-
-        t = DateTimeOffset.FromUnixTimeMilliseconds(ms);
-        return true;
+        Utf8Parser.TryParse(rest2[..c3], out val, out _);
+        return Utf8Parser.TryParse(rest2[(c3 + 1)..], out ms, out _);
     }
 
     public Task UpsertTagsAsync(IReadOnlyList<Tag> tags, CancellationToken ct = default)

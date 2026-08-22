@@ -115,7 +115,7 @@ services:
       context: ./apps/csharp-api
     restart: unless-stopped
     environment:
-      PRISM_STORAGE: ${CSHARP_API_STORAGE:-questdb}
+      PRISM_STORAGE: ${CSHARP_API_STORAGE:-timescaledb}
       HTTP_ADDR: "0.0.0.0:8083"
       POSTGRES_DSN: postgres://${POSTGRES_USER:-prism}:${POSTGRES_PASSWORD:-prism}@timescaledb:5432/${POSTGRES_DB:-prism}?sslmode=disable
       QUESTDB_URL: http://questdb:9000
@@ -123,8 +123,16 @@ services:
       VM_URL: http://victoriametrics:8428
       NATS_URL: nats://nats:4222
       NATS_SUBJECT: ${NATS_SUBJECT:-prism.samples}
+      DOTNET_gcServer: "0"
+      DOTNET_GCHeapHardLimit: "402653184"
     ports:
       - "${CSHARP_API_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8083/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
     depends_on:
       nats:
         condition: service_started

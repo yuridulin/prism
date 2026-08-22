@@ -1,0 +1,121 @@
+backend: csharp
+storage: victoriametrics
+status: completed
+when:
+  started_at: '2026-08-22T07:13:36Z'
+  finished_at: '2026-08-22T07:16:49Z'
+services:
+- nats
+- prometheus
+- victoriametrics
+- csharp-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: by-pair
+generator:
+  profile: query-mix
+  written: 0
+  queries: 2701
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: csharp
+  storage: victoriametrics
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: csharp
+  storage: victoriametrics
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.018018433713190306
+  range_p95_seconds: 0.09533194697921644
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.018018381331804362
+  storage_range_p95_seconds: 0.09533004799326975
+  api_p95_seconds: 0.1663051272851369
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 0.02%
+    mem: 199.5MiB
+  - name: sinus-server-gateway-svc
+    cpu: 4.91%
+    mem: 245.4MiB
+  - name: sinus-server-pulsar-svc
+    cpu: 4.61%
+    mem: 374.2MiB
+  - name: sinus-server-dashboards-svc
+    cpu: 4.91%
+    mem: 393MiB
+  - name: sinus-infra-mongo-express
+    cpu: 0.00%
+    mem: 8.609MiB
+  - name: sinus-infra-keycloak
+    cpu: 0.31%
+    mem: 299.2MiB
+  - name: sinus-infra-postgres
+    cpu: 0.12%
+    mem: 20.52MiB
+  - name: sinus-infra-timescale
+    cpu: 0.17%
+    mem: 852.9MiB
+  - name: sinus-infra-redis
+    cpu: 0.30%
+    mem: 2.012MiB
+  - name: sinus-infra-mongodb
+    cpu: 0.53%
+    mem: 33.43MiB
+  - name: prism-rust-api-1
+    cpu: 0.29%
+    mem: 1.641MiB
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 18.84MiB
+  - name: prism-postgres-exporter-1
+    cpu: 3.28%
+    mem: 26.82MiB
+  - name: prism-timescaledb-1
+    cpu: 10.22%
+    mem: 47.96MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.15%
+    mem: 27.77MiB
+  - name: prism-prometheus-1
+    cpu: 0.64%
+    mem: 82.45MiB
+  - name: prism-nats-1
+    cpu: 0.02%
+    mem: 11.36MiB
+  - name: prism-questdb-1
+    cpu: 0.92%
+    mem: 125.9MiB
+  api:
+    cpu: 0.02%
+    mem: 199.5MiB
+  storage:
+    cpu: 0.15%
+    mem: 27.77MiB
+storage_size:
+  bytes: 15419853
+  mib: 14.7
+  volume: prism_vm_data
+  path: /victoria-metrics-data

@@ -7,20 +7,20 @@
 - По умолчанию **parallel-by-backend**: на каждый API **N параллельных копий** (по одной на storage), общие БД, **один** 5m query на все пары backend-а. `by-backend` — те же БД, но API одно, storage переключается по очереди. Legacy: `--isolated-pairs` / `by-pair`.
 - **Volume sets** (суффикс `PRISM_VOLUME_SET`): `data` — query-mix lab (существующие тома `prism_*_data`), `write` — write-ceiling/iot-steady/burst/high-cardinality, `mixed` — sinus-like*. Запись не трогает lab-тома.
 - **Seed**: для query-mix на томе `data` сид пропускается, если архив уже есть (locf tag 1 и 9 на `ARCHIVE_END`). Явно: `--keep` или `skip_seed: true`.
-- **Preflight** перед `run`: `python sessions/run.py preflight` или автоматически в `run` — write/locf/range на probe-тегах 900001+; все 3 API должны совпасть на каждой БД. `--skip-preflight` только если осознанно.
+- **Preflight** перед `run`: `python sessions/run.py preflight` или автоматически в `run` — write/locf/range на probe-тегах 900001+; ответы C# на Timescale и VM должны совпасть с `sessions/fixtures/contract-probe.yaml`. `--skip-preflight` только если осознанно.
 - Envelope один на все пары, из `sessions/defaults.yaml`. Не крутить CPU/RAM «чтобы красивее выглядело».
 - Старт: `python sessions/run.py new --why "..." --duration 3m`, затем `run`.
 - Для `query-mix` duration — только фаза чтения. Seed архива идёт раньше и в duration не входит.
 - Продолжить с сорвавшейся пары: `--from-pair <slug>`.
 - Повторное чтение на уже залитом архиве: `--keep` (без wipe и без seed). `ARCHIVE_END` должен совпадать с сидом.
-- `wait_ready` обязан переживать обрыв TCP: C# и Rust поднимаются дольше Go. Не сужать `except` до `URLError`.
+- `wait_ready` обязан переживать обрыв TCP: C# поднимается дольше Go. Не сужать `except` до `URLError`.
 
 ## Что сравниваем
 
 - `iot-steady`, `high-cardinality`, `burst` — запись при фиксированном offer. locf/range там будут `n/a`.
 - `write-ceiling` — потолок записи. HTTP, offer выше конверта; ingest/s и ошибки — это пара, не NATS.
 - Чтения — профиль `query-mix`: сначала одинаковый архив на год (частые 1m / редкие 1h), затем locf и range 1..30d на готовой БД. Seed в scorecard не входит.
-- Полная матрица: **3 API × 3 БД** (Go / C# / Rust × Timescale / QuestDB / VictoriaMetrics). Пары по очереди, тот же envelope.
+- Арена по умолчанию: **C# × Timescale / VictoriaMetrics**. Go / Rust / QuestDB вне сравнения (предпочитаемый стек C#; QuestDB не выиграл ни запись, ни range). `--pairs` всё ещё может поднять старые комбинации.
 - Scorecard: ingest, ошибки write/query, p95 write/locf/range (backend и storage), CPU/RAM, диск тома БД (`storage_mib`) после той же истории.
 - На лёгком ingest (~2k/s) пары не разъедутся по rate — не писать «все одинаковые».
 - CPU API в конце часто 0%: снимок `docker stats` после генератора.
@@ -31,31 +31,29 @@
 
 | Кандидат | Почему выбросили |
 | --- | --- |
-| **Python API** | На range до ~345k точек pydantic/JSON-сериализация давала секунды и таймауты; Go/C#/Rust на той же БД сходятся — это overhead API, не storage. |
-| **InfluxDB** | Худшие чтения на контракте: range p95 ~2–10 s, таймауты на 30d окнах; InfluxQL/line не заточены под сырой range с LOCF. |
-| **ClickHouse** | На `write-ceiling` стабильно в хвосте (~41k/s), мутации/тюнинг хрупкие, ни ingest, ни locf/range не лидировали. «Все хвалят ClickHouse» — но не на **этом** контракте (append + locf + raw range без агрегатов). |
+| **Python API** | На range до ~345k точек pydantic/JSON-сериализация давала секунды и таймауты. |
+| **InfluxDB** | Худшие чтения на контракте: range p95 ~2–10 s, таймауты на 30d окнах. |
+| **ClickHouse** | На `write-ceiling` стабильно в хвосте; ни ingest, ни locf/range не лидировали. |
+| **QuestDB** | На C# range хуже VM, диск как у Timescale. |
+| **Go / Rust API** | Языковой эксперимент; дальше предпочитаемый стек **C#**. |
 
 ## Арена записи
 
-Три чемпиона (Go / C# / Rust) соревнуются на `write-ceiling`.
-Побеждает выше ingest/s без ошибок; при равенстве — ниже write p95.
+C# на Timescale и VictoriaMetrics. Побеждает выше ingest/s без ошибок; при равенстве — ниже write p95.
 
-Текущие пути записи (уже не наивные INSERT):
+Текущие пути (append-only, без `ON CONFLICT` на рядах):
 
 | Стор | Запись | Чтение |
 |------|--------|--------|
-| Timescale | PostgreSQL **COPY BINARY** (Go `CopyFrom`, C# `BeginBinaryImport`, Rust `FORMAT BINARY`) | locf: `unnest` + `LATERAL LIMIT 1`; range: один SQL (head + tail) |
-| QuestDB | **ILP TCP** `:9009`, пул соединений | locf: `LATEST ON` через `/exec`; range: `/exp` CSV **stream** |
-| VictoriaMetrics | Influx line `POST /write?precision=ns` (`prism_sample{tag_id,quality}`) | locf и range — один `/api/v1/export/csv` + выбор last/`(from,to]` в адаптере, stream |
+| Timescale | PostgreSQL **COPY BINARY** (`BeginBinaryImport`) | locf: `unnest` + `LATERAL LIMIT 1`; range: один SQL (head + tail) |
+| VictoriaMetrics | Influx line `POST /write?precision=ns` (`prism_sample{tag_id,quality}`) | locf и range — `/api/v1/export/csv` stream + last/`(from,to]` в адаптере |
 
-Ещё можно крутить: ILP builder без аллокаций, пулы, reuse HTTP, stream CSV, binary COPY. VM `/api/v1/import` — только если не ломает locf/range на `prism_sample{tag_id}`.
-
-Запрещено: менять OpenAPI, семантику locf/range, envelope, чужой `apps/<backend>`, генератор, профили.
+Запрещено: менять OpenAPI, семантику locf/range, envelope, генератор, профили, `apps/go-api` / `apps/rust-api` в этой арене.
 `/readyz` и Observed-метрики должны жить.
 
-Приёмка правок адаптера: `python sessions/run.py preflight` — locf/range совпадают у Go/C#/Rust на каждой БД. Сессии write-ceiling/query-mix — цифры эффективности, не ворота корректности.
+Приёмка: `python sessions/run.py preflight` — locf/range C# на Timescale и VM совпадают с фикстурой. Сессии write-ceiling/query-mix — цифры эффективности, не ворота корректности.
 
-Каждый чемпион трогает только свой каталог: `apps/go-api`, `apps/csharp-api`, `apps/rust-api`. (`apps/python-api` — вне матрицы, см. выше.)
+Править только `apps/csharp-api` (остальные адаптеры в `apps/` не трогать, пока не просят `--pairs`).
 
 ## Контракт
 
@@ -85,3 +83,5 @@
 - QuestDB HTTP с хоста: `9001`.
 - Prometheus: `user: "65534:65534"`. После переноса data-root образ без этого падает.
 - Ряды в Timescale / VictoriaMetrics хранятся 400 дней — иначе годовой архив для `query-mix` срежется. Prometheus по-прежнему 7d.
+- C# в конверте 1 CPU / 512M: workstation GC (`DOTNET_gcServer=0`), `GCHeapHardLimit` ~384MiB, `ThreadPool.SetMinThreads(16, 16)`. Иначе Server GC и пул из 1 воркера сажают range.
+- Если `docker compose build csharp-api` зависает на `dotnet publish` в Linux SDK, собрать runtime-образ с хоста и `PRISM_NO_BUILD=1` (run.py снимает `--build`).

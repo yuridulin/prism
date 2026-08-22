@@ -18,7 +18,21 @@ internal static class StoreUtil
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
             MaxConnectionsPerServer = 32,
             EnableMultipleHttp2Connections = true,
-            ConnectTimeout = TimeSpan.FromSeconds(5)
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+            ConnectCallback = async (ctx, ct) =>
+            {
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                try
+                {
+                    await socket.ConnectAsync(ctx.DnsEndPoint, ct).ConfigureAwait(false);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            }
         };
         var http = new HttpClient(handler, disposeHandler: true)
         {

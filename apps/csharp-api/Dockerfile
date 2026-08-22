@@ -10,7 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget \
 COPY --from=build /out .
 ENV ASPNETCORE_URLS=http://0.0.0.0:8083
 ENV HTTP_ADDR=0.0.0.0:8083
-ENV PRISM_STORAGE=questdb
+ENV PRISM_STORAGE=timescaledb
+ENV DOTNET_gcServer=0
+ENV DOTNET_GCHeapHardLimit=402653184
 EXPOSE 8083
-HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD wget -q -O- http://127.0.0.1:8083/healthz || exit 1
+HEALTHCHECK --interval=10s --timeout=5s --start-period=40s --retries=8 CMD wget -q -O- http://127.0.0.1:8083/healthz || exit 1
 ENTRYPOINT ["dotnet", "Prism.Api.dll"]

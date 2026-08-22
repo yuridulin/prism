@@ -1,0 +1,376 @@
+id: 20260822T071023-query-mix
+status: completed
+when:
+  created_at: '2026-08-22T07:10:23Z'
+  started_at: '2026-08-22T07:10:24Z'
+  finished_at: '2026-08-22T07:16:50Z'
+why: C# rematch after buffered JSON, thread-pool floor, workstation GC
+what:
+  duration: 3m
+  duration_seconds: 180
+  load:
+    profile: query-mix
+    transport: ''
+  pairs:
+  - backend: csharp
+    storage: timescaledb
+  - backend: csharp
+    storage: victoriametrics
+  resources: &id001
+    api:
+      cpus: '1.0'
+      memory: 512M
+    storage:
+      cpus: '1.0'
+      memory: 1G
+    bus:
+      cpus: '0.50'
+      memory: 256M
+    observe:
+      cpus: '0.50'
+      memory: 512M
+    generator:
+      cpus: '1.0'
+      memory: 512M
+  reuse_volumes: true
+  skip_seed: true
+  archive_end: '2026-08-20T16:49:20Z'
+  dispatch: by-pair
+  volume_set: data
+  skip_preflight: true
+results:
+  pairs:
+    csharp-timescaledb:
+      backend: csharp
+      storage: timescaledb
+      status: completed
+      when:
+        started_at: '2026-08-22T07:10:25Z'
+        finished_at: '2026-08-22T07:13:35Z'
+      services:
+      - nats
+      - prometheus
+      - timescaledb
+      - postgres-exporter
+      - csharp-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2400
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: csharp
+        storage: timescaledb
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: timescaledb
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.00885236386288021
+        range_p95_seconds: 0.2848231634651965
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.008852253267120016
+        storage_range_p95_seconds: 0.2838442773598452
+        api_p95_seconds: 0.38562399602694575
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 2.77%
+          mem: 185.7MiB
+        - name: sinus-server-gateway-svc
+          cpu: 1.96%
+          mem: 245.5MiB
+        - name: sinus-server-pulsar-svc
+          cpu: 2.06%
+          mem: 374.2MiB
+        - name: sinus-server-dashboards-svc
+          cpu: 4.51%
+          mem: 392MiB
+        - name: sinus-infra-mongo-express
+          cpu: 0.00%
+          mem: 8.613MiB
+        - name: sinus-infra-keycloak
+          cpu: 0.08%
+          mem: 287.7MiB
+        - name: sinus-infra-postgres
+          cpu: 0.00%
+          mem: 16.06MiB
+        - name: sinus-infra-timescale
+          cpu: 1.45%
+          mem: 877.6MiB
+        - name: sinus-infra-redis
+          cpu: 0.30%
+          mem: 2.988MiB
+        - name: sinus-infra-mongodb
+          cpu: 1.12%
+          mem: 21.95MiB
+        - name: prism-rust-api-1
+          cpu: 0.00%
+          mem: 1.566MiB
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 17.74MiB
+        - name: prism-postgres-exporter-1
+          cpu: 0.00%
+          mem: 9.855MiB
+        - name: prism-timescaledb-1
+          cpu: 2.35%
+          mem: 81.64MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.25%
+          mem: 20.8MiB
+        - name: prism-prometheus-1
+          cpu: 0.56%
+          mem: 60.92MiB
+        - name: prism-nats-1
+          cpu: 0.30%
+          mem: 7.191MiB
+        - name: prism-questdb-1
+          cpu: 0.99%
+          mem: 143.4MiB
+        api:
+          cpu: 2.77%
+          mem: 185.7MiB
+        storage:
+          cpu: 2.35%
+          mem: 81.64MiB
+      storage_size:
+        bytes: 381046812
+        mib: 363.4
+        volume: prism_timescale_data
+        path: /var/lib/postgresql/data
+    csharp-victoriametrics:
+      backend: csharp
+      storage: victoriametrics
+      status: completed
+      when:
+        started_at: '2026-08-22T07:13:36Z'
+        finished_at: '2026-08-22T07:16:49Z'
+      services:
+      - nats
+      - prometheus
+      - victoriametrics
+      - csharp-api
+      reuse_volumes: true
+      volume_set: data
+      skip_seed: true
+      dispatch: by-pair
+      generator:
+        profile: query-mix
+        written: 0
+        queries: 2701
+        write_errors: 0
+        query_errors: 0
+        elapsed_seconds: 180.0
+        ingest_rate: 0.0
+        seed_elapsed_seconds: 0.0
+        query_elapsed_seconds: 180.0
+      meta:
+        backend: csharp
+        storage: victoriametrics
+        storages:
+        - timescaledb
+        - clickhouse
+        - questdb
+        - influxdb
+        - victoriametrics
+        contract: v1.2
+        ops:
+        - write
+        - locf
+        - range
+        - tags
+      prometheus:
+      - backend: csharp
+        storage: victoriametrics
+        ingest_rate: null
+        write_error_rate: null
+        write_p95_seconds: null
+        locf_p95_seconds: 0.018018433713190306
+        range_p95_seconds: 0.09533194697921644
+        storage_write_p95_seconds: null
+        storage_locf_p95_seconds: 0.018018381331804362
+        storage_range_p95_seconds: 0.09533004799326975
+        api_p95_seconds: 0.1663051272851369
+        locf_error_rate: null
+        range_error_rate: null
+      resources:
+        raw:
+        - name: prism-csharp-api-1
+          cpu: 0.02%
+          mem: 199.5MiB
+        - name: sinus-server-gateway-svc
+          cpu: 4.91%
+          mem: 245.4MiB
+        - name: sinus-server-pulsar-svc
+          cpu: 4.61%
+          mem: 374.2MiB
+        - name: sinus-server-dashboards-svc
+          cpu: 4.91%
+          mem: 393MiB
+        - name: sinus-infra-mongo-express
+          cpu: 0.00%
+          mem: 8.609MiB
+        - name: sinus-infra-keycloak
+          cpu: 0.31%
+          mem: 299.2MiB
+        - name: sinus-infra-postgres
+          cpu: 0.12%
+          mem: 20.52MiB
+        - name: sinus-infra-timescale
+          cpu: 0.17%
+          mem: 852.9MiB
+        - name: sinus-infra-redis
+          cpu: 0.30%
+          mem: 2.012MiB
+        - name: sinus-infra-mongodb
+          cpu: 0.53%
+          mem: 33.43MiB
+        - name: prism-rust-api-1
+          cpu: 0.29%
+          mem: 1.641MiB
+        - name: prism-go-api-1
+          cpu: 0.00%
+          mem: 18.84MiB
+        - name: prism-postgres-exporter-1
+          cpu: 3.28%
+          mem: 26.82MiB
+        - name: prism-timescaledb-1
+          cpu: 10.22%
+          mem: 47.96MiB
+        - name: prism-victoriametrics-1
+          cpu: 0.15%
+          mem: 27.77MiB
+        - name: prism-prometheus-1
+          cpu: 0.64%
+          mem: 82.45MiB
+        - name: prism-nats-1
+          cpu: 0.02%
+          mem: 11.36MiB
+        - name: prism-questdb-1
+          cpu: 0.92%
+          mem: 125.9MiB
+        api:
+          cpu: 0.02%
+          mem: 199.5MiB
+        storage:
+          cpu: 0.15%
+          mem: 27.77MiB
+      storage_size:
+        bytes: 15419853
+        mib: 14.7
+        volume: prism_vm_data
+        path: /victoria-metrics-data
+  comparison:
+    profile: query-mix
+    duration: 3m
+    envelope: *id001
+    how: Одинаковый resource envelope. Каждая пара — отдельный чистый старт. Сначала
+      тот же архив (год, частые и редкие теги), затем только locf/range. Эффективнее
+      та, что отвечает быстрее на locf и range без ошибок и занимает меньше места
+      тем же архивом. storage_*_p95 показывает, где сидит задержка — в БД или в API.
+      Seed в scorecard не входит.
+    primary: read
+    rows:
+    - pair: csharp-timescaledb
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2400
+      write_p95_ms: null
+      locf_p95_ms: 8.852
+      range_p95_ms: 284.823
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 8.852
+      storage_range_p95_ms: 283.844
+      api_p95_ms: 385.624
+      cpu_api: 2.77%
+      mem_api: 185.7MiB
+      cpu_storage: 2.35%
+      mem_storage: 81.64MiB
+      storage_bytes: 381046812
+      storage_mib: 363.4
+    - pair: csharp-victoriametrics
+      status: completed
+      ingest_rate: null
+      seed_written: 0
+      seed_elapsed_seconds: 0.0
+      write_errors: 0
+      query_errors: 0
+      queries: 2701
+      write_p95_ms: null
+      locf_p95_ms: 18.018
+      range_p95_ms: 95.332
+      storage_write_p95_ms: null
+      storage_locf_p95_ms: 18.018
+      storage_range_p95_ms: 95.33
+      api_p95_ms: 166.305
+      cpu_api: 0.02%
+      mem_api: 199.5MiB
+      cpu_storage: 0.15%
+      mem_storage: 27.77MiB
+      storage_bytes: 15419853
+      storage_mib: 14.7
+    ranks:
+      locf_p95_ms:
+      - csharp-timescaledb
+      - csharp-victoriametrics
+      range_p95_ms:
+      - csharp-victoriametrics
+      - csharp-timescaledb
+      storage_mib:
+      - csharp-victoriametrics
+      - csharp-timescaledb
+conclusions: 'Черновик по цифрам. Заменить человеческим выводом.
+
+
+  Сравнение пар: профиль query-mix за 3m.
+
+  Одинаковый resource envelope. Каждая пара — отдельный чистый старт. Сначала тот
+  же архив (год, частые и редкие теги), затем только locf/range. Эффективнее та, что
+  отвечает быстрее на locf и range без ошибок и занимает меньше места тем же архивом.
+  storage_*_p95 показывает, где сидит задержка — в БД или в API. Seed в scorecard
+  не входит.
+
+
+  pair                     status       ingest/s  w_err  q_err    w p95     locf    range     disk  cpu
+  api   cpu db
+
+  csharp-timescaledb       completed         n/a      0      0      n/a      8.9    284.8    363.4    2.77%    2.35%
+
+  csharp-victoriametrics   completed         n/a      0      0      n/a     18.0     95.3     14.7    0.02%    0.15%
+
+  locf:   csharp-timescaledb > csharp-victoriametrics  (меньше p95 лучше)
+
+  range:  csharp-victoriametrics > csharp-timescaledb  (меньше p95 лучше)
+
+  disk:   csharp-victoriametrics > csharp-timescaledb  (меньше MiB лучше)
+
+  '

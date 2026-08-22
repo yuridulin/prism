@@ -75,6 +75,8 @@ def compose(
     if env_file is not None:
         cmd.extend(["--env-file", str(env_file)])
     cmd.extend(args)
+    if os.environ.get("PRISM_NO_BUILD") == "1":
+        cmd = [part for part in cmd if part != "--build"]
     return subprocess.run(cmd, cwd=ROOT, check=False, text=True, capture_output=capture)
 
 
@@ -191,13 +193,20 @@ def recreate_api(backend: str, env_file: Path) -> None:
 
 
 def ensure_backend_stack(session: dict, backend: str, env_file: Path) -> None:
-    services = backend_stack_services(backend)
+    storages = [p["storage"] for p in ((session.get("what") or {}).get("pairs") or []) if p.get("backend") == backend]
+    if not storages:
+        storages = None
+    services = backend_stack_services(backend, storages)
     compose_checked(["up", "-d", "--build", *services], env_file, capture=False)
     wait_ready("http://127.0.0.1:9090/-/ready")
 
 
 def ensure_infra_for_preflight(session: dict, volume_set: str, storages: list[str]) -> None:
-    pair = normalize_pair({"backend": "go", "storage": storages[0]})
+    dummy_backend = next(
+        (p["backend"] for p in ((session.get("what") or {}).get("pairs") or [])),
+        "csharp",
+    )
+    pair = normalize_pair({"backend": dummy_backend, "storage": storages[0]})
     env_file = write_compose_env(session, pair)
     lines = env_file.read_text(encoding="utf-8").splitlines()
     if not any(line.startswith("PRISM_VOLUME_SET=") for line in lines):
@@ -682,7 +691,11 @@ def run_backend_group_parallel(session: dict, backend: str, pairs: list[dict]) -
     if not keep:
         wipe_stack(base_env)
 
-    compose_checked(["up", "-d", "--build", *storage_stack_services()], base_env, capture=False)
+    compose_checked(
+        ["up", "-d", "--build", *storage_stack_services([p["storage"] for p in pairs])],
+        base_env,
+        capture=False,
+    )
 
     replicas: list[tuple[dict, str, int, Path]] = []
     for pair in pairs:
@@ -1042,7 +1055,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--profile", default="query-mix", help="profile for volume_set selection")
     preflight.add_argument(
         "--pairs",
-        help="comma-separated backend:storage list (default: full 4x5 from defaults)",
+        help="comma-separated backend:storage list (default: session pairs or csharp × timescale/vm)",
     )
     preflight.add_argument("--keep", action="store_true", help="use data volume set without wipe")
     preflight.set_defaults(func=cmd_preflight)

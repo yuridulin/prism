@@ -19,5 +19,18 @@ range:
   young: "2026-08-19T12:10:00Z"
 
 # Expected semantics (all backends must match after normalization):
-# locf: 900001 -> 11.0 @ 12:05; 900002 -> 20.0 @ 12:10
-# range 900001: carried 10.5 @ 12:00, points 11.0 @ 12:05
+# locf at 12:07: 900001 -> 11.0 @ 12:05; 900002 has no point <= exact.
+expect:
+  locf:
+    tags:
+      - id: 900001
+        values:
+          - { date: "2026-08-19T12:05:00Z", value: 11.0, quality: 192 }
+      - id: 900002
+        values: []
+  range:
+    tags:
+      - id: 900001
+        values:
+          - { date: "2026-08-19T12:00:00Z", value: 10.5, quality: 192 }
+          - { date: "2026-08-19T12:05:00Z", value: 11.0, quality: 192 }

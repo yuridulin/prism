@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Prism.Api</RootNamespace>
     <AssemblyName>Prism.Api</AssemblyName>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ClickHouse.Client" Version="7.14.0" />

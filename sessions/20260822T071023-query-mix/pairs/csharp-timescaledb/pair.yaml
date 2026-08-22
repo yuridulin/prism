@@ -1,0 +1,122 @@
+backend: csharp
+storage: timescaledb
+status: completed
+when:
+  started_at: '2026-08-22T07:10:25Z'
+  finished_at: '2026-08-22T07:13:35Z'
+services:
+- nats
+- prometheus
+- timescaledb
+- postgres-exporter
+- csharp-api
+reuse_volumes: true
+volume_set: data
+skip_seed: true
+dispatch: by-pair
+generator:
+  profile: query-mix
+  written: 0
+  queries: 2400
+  write_errors: 0
+  query_errors: 0
+  elapsed_seconds: 180.0
+  ingest_rate: 0.0
+  seed_elapsed_seconds: 0.0
+  query_elapsed_seconds: 180.0
+meta:
+  backend: csharp
+  storage: timescaledb
+  storages:
+  - timescaledb
+  - clickhouse
+  - questdb
+  - influxdb
+  - victoriametrics
+  contract: v1.2
+  ops:
+  - write
+  - locf
+  - range
+  - tags
+prometheus:
+- backend: csharp
+  storage: timescaledb
+  ingest_rate: null
+  write_error_rate: null
+  write_p95_seconds: null
+  locf_p95_seconds: 0.00885236386288021
+  range_p95_seconds: 0.2848231634651965
+  storage_write_p95_seconds: null
+  storage_locf_p95_seconds: 0.008852253267120016
+  storage_range_p95_seconds: 0.2838442773598452
+  api_p95_seconds: 0.38562399602694575
+  locf_error_rate: null
+  range_error_rate: null
+resources:
+  raw:
+  - name: prism-csharp-api-1
+    cpu: 2.77%
+    mem: 185.7MiB
+  - name: sinus-server-gateway-svc
+    cpu: 1.96%
+    mem: 245.5MiB
+  - name: sinus-server-pulsar-svc
+    cpu: 2.06%
+    mem: 374.2MiB
+  - name: sinus-server-dashboards-svc
+    cpu: 4.51%
+    mem: 392MiB
+  - name: sinus-infra-mongo-express
+    cpu: 0.00%
+    mem: 8.613MiB
+  - name: sinus-infra-keycloak
+    cpu: 0.08%
+    mem: 287.7MiB
+  - name: sinus-infra-postgres
+    cpu: 0.00%
+    mem: 16.06MiB
+  - name: sinus-infra-timescale
+    cpu: 1.45%
+    mem: 877.6MiB
+  - name: sinus-infra-redis
+    cpu: 0.30%
+    mem: 2.988MiB
+  - name: sinus-infra-mongodb
+    cpu: 1.12%
+    mem: 21.95MiB
+  - name: prism-rust-api-1
+    cpu: 0.00%
+    mem: 1.566MiB
+  - name: prism-go-api-1
+    cpu: 0.00%
+    mem: 17.74MiB
+  - name: prism-postgres-exporter-1
+    cpu: 0.00%
+    mem: 9.855MiB
+  - name: prism-timescaledb-1
+    cpu: 2.35%
+    mem: 81.64MiB
+  - name: prism-victoriametrics-1
+    cpu: 0.25%
+    mem: 20.8MiB
+  - name: prism-prometheus-1
+    cpu: 0.56%
+    mem: 60.92MiB
+  - name: prism-nats-1
+    cpu: 0.30%
+    mem: 7.191MiB
+  - name: prism-questdb-1
+    cpu: 0.99%
+    mem: 143.4MiB
+  api:
+    cpu: 2.77%
+    mem: 185.7MiB
+  storage:
+    cpu: 2.35%
+    mem: 81.64MiB
+storage_size:
+  bytes: 381046812
+  mib: 363.4
+  volume: prism_timescale_data
+  path: /var/lib/postgresql/data

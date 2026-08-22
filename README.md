@@ -16,8 +16,8 @@ Stretch и агрегаты в API нет — сравниваются толь�
 
 | Слой | Варианты |
 | --- | --- |
-| API | Go `:8081`, C# `:8083`, Rust `:8084` (Python `:8082` — вне матрицы) |
-| Storage | TimescaleDB, QuestDB, VictoriaMetrics |
+| API | **C# `:8083`** (Go/Rust/Python вне арены; код в `apps/` остаётся) |
+| Storage | TimescaleDB, VictoriaMetrics (QuestDB вне арены) |
 | Шина | NATS JetStream (`prism.samples`) |
 | Наблюдение | Prometheus + Grafana |
 | Нагрузка | YAML-профили → генератор или k6 |
@@ -28,14 +28,14 @@ Stretch и агрегаты в API нет — сравниваются толь�
 
 ```powershell
 copy .env.example .env
-docker compose up -d --build go-api questdb nats prometheus
+docker compose up -d --build csharp-api timescaledb nats prometheus
 ```
 
 ```powershell
-curl http://localhost:8081/api/meta
-curl -X PUT http://localhost:8081/api/values -H "Content-Type: application/json" -d "[{\"id\":1,\"value\":42.1,\"quality\":192}]"
-curl -X POST http://localhost:8081/api/values -H "Content-Type: application/json" -d "{\"tagsId\":[1],\"exact\":\"2026-08-18T18:00:00Z\"}"
-curl -X POST http://localhost:8081/api/values -H "Content-Type: application/json" -d "{\"tagsId\":[1],\"old\":\"2026-08-18T17:00:00Z\",\"young\":\"2026-08-18T18:00:00Z\"}"
+curl http://localhost:8083/api/meta
+curl -X PUT http://localhost:8083/api/values -H "Content-Type: application/json" -d "[{\"id\":1,\"value\":42.1,\"quality\":192}]"
+curl -X POST http://localhost:8083/api/values -H "Content-Type: application/json" -d "{\"tagsId\":[1],\"exact\":\"2026-08-18T18:00:00Z\"}"
+curl -X POST http://localhost:8083/api/values -H "Content-Type: application/json" -d "{\"tagsId\":[1],\"old\":\"2026-08-18T17:00:00Z\",\"young\":\"2026-08-18T18:00:00Z\"}"
 ```
 
 - Grafana: http://localhost:3000 (`admin` / `prism`)
@@ -48,14 +48,14 @@ curl -X POST http://localhost:8081/api/values -H "Content-Type: application/json
 
 Диспетчер гоняет **пары по очереди**: `down -v` → только API и БД пары → прогон → запись → снова `down -v`.
 
-Стартовые пары в `sessions/defaults.yaml`: полная матрица 3×3 (Go/C#/Rust × Timescale/QuestDB/VM).
+Стартовые пары в `sessions/defaults.yaml`: **C# × Timescale / VictoriaMetrics**.
 
 ```powershell
 pip install -r sessions/requirements.txt
 python sessions/run.py new --why "LOCF и range на годовом архиве" --profile query-mix
 python sessions/run.py run
-python sessions/run.py new --why "Только QuestDB" --pairs go:questdb,csharp:questdb,rust:questdb --run
-python sessions/run.py preflight   # паритет locf/range: Go/C#/Rust на каждой БД
+python sessions/run.py new --why "Только VM" --pairs csharp:victoriametrics --run
+python sessions/run.py preflight   # locf/range C# на Timescale и VM vs фикстура
 ```
 
 ## Профили

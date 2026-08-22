@@ -1,5 +1,6 @@
 # Starting characteristics for a new session.
-# Matrix: 3 API (Go, C#, Rust) × 3 storage (Timescale, QuestDB, VictoriaMetrics).
+# Arena: C# × Timescale / VictoriaMetrics. Go/Rust were the language experiment;
+# QuestDB is out of this comparison. Adapters stay in apps/ for --pairs.
 
 duration: 5m
 dispatch: parallel-by-backend
@@ -9,15 +10,8 @@ load:
   transport: ""
 
 pairs:
-  - { backend: go, storage: timescaledb }
-  - { backend: go, storage: questdb }
-  - { backend: go, storage: victoriametrics }
   - { backend: csharp, storage: timescaledb }
-  - { backend: csharp, storage: questdb }
   - { backend: csharp, storage: victoriametrics }
-  - { backend: rust, storage: timescaledb }
-  - { backend: rust, storage: questdb }
-  - { backend: rust, storage: victoriametrics }
 
 resources:
   api:
